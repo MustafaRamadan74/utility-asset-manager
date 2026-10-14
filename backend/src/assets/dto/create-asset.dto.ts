@@ -16,7 +16,11 @@ import { AssetStatus, AssetType } from '../asset.types';
 @ValidatorConstraint({ name: 'IsDiameterValid', async: false })
 export class IsDiameterValidConstraint implements ValidatorConstraintInterface {
   validate(diameter: any, args: ValidationArguments): boolean {
-    const obj = args.object as CreateAssetDto;
+    const obj = args.object as any;
+    // When updating, 'type' is omitted in UpdateAssetDto; merge & re-validation is enforced in AssetsService (D5)
+    if (obj.type === undefined) {
+      return true;
+    }
     if (obj.type === AssetType.PIPE) {
       return (
         typeof diameter === 'number' &&
@@ -28,7 +32,7 @@ export class IsDiameterValidConstraint implements ValidatorConstraintInterface {
   }
 
   defaultMessage(args: ValidationArguments): string {
-    const obj = args.object as CreateAssetDto;
+    const obj = args.object as any;
     if (obj.type === AssetType.PIPE) {
       return 'diameter_mm is required and must be a positive integer greater than 0 for PIPE';
     }
