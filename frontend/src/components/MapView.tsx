@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import Map from '@arcgis/core/Map';
+import Basemap from '@arcgis/core/Basemap';
 import MapView from '@arcgis/core/views/MapView';
 import WebTileLayer from '@arcgis/core/layers/WebTileLayer';
 import GraphicsLayer from '@arcgis/core/layers/GraphicsLayer';
@@ -88,10 +89,14 @@ export default function MapViewComponent({
     issuesLayerRef.current = issuesLayer;
 
     // 3. Map with OSM basemap and graphic layers
+    const basemap = new Basemap({
+      baseLayers: [osmLayer],
+      title: 'OpenStreetMap',
+      id: 'osm-basemap',
+    });
+
     const map = new Map({
-      basemap: {
-        baseLayers: [osmLayer],
-      },
+      basemap,
       layers: [assetsLayer, selectionLayer, issuesLayer],
     });
 
@@ -193,18 +198,15 @@ export default function MapViewComponent({
       const currentMode = modeRef.current;
 
       if (currentMode === 'VIEW') {
-        // HitTest on assetsLayer
-        const response = await view.hitTest(event, {
-          include: [assetsLayerRef.current!],
-        });
-
-        if (response.results.length > 0) {
-          const graphicResult = response.results.find(
-            (r) => r.type === 'graphic',
-          ) as __esri.GraphicHit;
-          if (graphicResult?.graphic?.attributes) {
-            onAssetSelect(graphicResult.graphic.attributes as Asset);
-            return;
+        // HitTest on clicked graphics
+        const response = await view.hitTest(event);
+        if (response.results && response.results.length > 0) {
+          for (const res of response.results) {
+            const g = (res as any).graphic;
+            if (g && g.attributes && g.attributes.id) {
+              onAssetSelect(g.attributes as Asset);
+              return;
+            }
           }
         }
         onAssetSelect(null);

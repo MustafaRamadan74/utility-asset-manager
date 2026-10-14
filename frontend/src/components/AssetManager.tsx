@@ -11,6 +11,7 @@ import {
   ValidationReport,
 } from '../types/asset';
 import { api } from '../lib/api';
+import AssetForm from './AssetForm';
 
 // Dynamic import with SSR disabled inside Client Component (D7)
 const MapView = dynamic(() => import('./MapView'), {
@@ -254,52 +255,20 @@ export default function AssetManager() {
           }}
         />
 
-        {/* Asset Details Side Panel (Placeholder for Phase 9) */}
+        {/* Asset Details & Editing Side Panel (Phase 9) */}
         {selectedAsset && (
-          <aside className="side-drawer">
-            <div className="drawer-header">
-              <div className="drawer-title">
-                {selectedAsset.type}: {selectedAsset.name}
-              </div>
-              <button
-                className="drawer-close-btn"
-                onClick={handleClearSelection}
-              >
-                ✕
-              </button>
-            </div>
-            <div className="drawer-content">
-              <div className="form-group">
-                <label className="form-label">ID</label>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
-                  {selectedAsset.id}
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Type</label>
-                <div>{selectedAsset.type}</div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Status</label>
-                <div>{selectedAsset.status}</div>
-              </div>
-              {selectedAsset.diameter_mm && (
-                <div className="form-group">
-                  <label className="form-label">Diameter (mm)</label>
-                  <div>{selectedAsset.diameter_mm} mm</div>
-                </div>
-              )}
-              <div className="form-group">
-                <label className="form-label">Geometry</label>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', wordBreak: 'break-all' }}>
-                  {JSON.stringify(selectedAsset.geometry)}
-                </div>
-              </div>
-              <p style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '16px' }}>
-                Full editing & deletion form will be activated in Phase 9.
-              </p>
-            </div>
-          </aside>
+          <AssetForm
+            asset={selectedAsset}
+            onClose={handleClearSelection}
+            onSaveSuccess={(updated) => {
+              setSelectedAsset(updated);
+              setRefreshTrigger((prev) => prev + 1);
+            }}
+            onDeleteSuccess={() => {
+              setSelectedAsset(null);
+              setRefreshTrigger((prev) => prev + 1);
+            }}
+          />
         )}
       </div>
     </div>
