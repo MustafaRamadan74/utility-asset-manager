@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
+  ApiBody,
   ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -23,6 +24,8 @@ import { AssetsService } from './assets.service';
 import { CreateAssetDto } from './dto/create-asset.dto';
 import { UpdateAssetDto } from './dto/update-asset.dto';
 import { ListAssetsQueryDto } from './dto/list-assets-query.dto';
+import { NearestQueryDto } from './dto/nearest-query.dto';
+import { WithinPolygonDto } from './dto/within-polygon.dto';
 import { Asset } from './asset.types';
 
 @ApiTags('Assets')
@@ -52,7 +55,7 @@ export class AssetsController {
   @ApiOperation({
     summary: 'List assets with optional filters',
     description:
-      'Retrieves assets filtered by type, status, and/or bounding box (bbox).',
+      'Retrieves assets filtered by type, status, and/or bounding box (bbox: minX,minY,maxX,maxY).',
   })
   @ApiOkResponse({
     description: 'List of matching assets.',
@@ -61,7 +64,66 @@ export class AssetsController {
     return this.assetsService.findAll(query);
   }
 
-  // Note: D5 route order requires :id routes to be defined after specific path routes
+  // --- Spatial Query Routes (Declared BEFORE :id routes per D5) ---
+
+  @Get('nearest')
+  @ApiOperation({
+    summary: 'Find nearest assets to a geographic coordinate (D4)',
+    description:
+      'Finds nearest assets to [lng, lat] with geodesic distance calculated in metres on the spheroid.',
+  })
+  @ApiOkResponse({
+    description: 'List of nearest assets ordered by geodesic distance in metres.',
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid coordinates or limit parameter.',
+  })
+  async findNearest(
+    @Query() query: NearestQueryDto,
+  ): Promise<(Asset & { distance_m: number })[]> {
+    return this.assetsService.findNearest(query.lng, query.lat, query.limit);
+  }
+
+  @Post('query/within')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Query assets within a GeoJSON Polygon (D4)',
+    description:
+      'The request body is the GeoJSON Polygon itself. Returns all intersecting utility assets.',
+  })
+  @ApiBody({
+    type: WithinPolygonDto,
+    description: 'GeoJSON Polygon geometry object',
+    examples: {
+      polygonExample: {
+        summary: 'Bounding Polygon in New Capital',
+        value: {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [31.759, 30.019],
+              [31.765, 30.019],
+              [31.765, 30.023],
+              [31.759, 30.023],
+              [31.759, 30.019],
+            ],
+          ],
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Assets intersecting the provided polygon.',
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid GeoJSON polygon structure.',
+  })
+  async findWithin(@Body() polygon: any): Promise<Asset[]> {
+    return this.assetsService.findWithin(polygon);
+  }
+
+  // --- ID Routes (Declared AFTER specific routes per D5) ---
+
   @Get(':id')
   @ApiOperation({
     summary: 'Get asset by ID',
