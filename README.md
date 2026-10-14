@@ -83,11 +83,11 @@ The database container includes PostGIS 3.4 and runs on port `5432` with a built
 | Requirement | Phase | Status |
 |---|---|:---:|
 | PostGIS Docker Container & Environment Config | Phase 1 | ✅ Completed |
-| Schema Migration, Enums, Constraints & Spatial Indexes | Phase 2 | Planned |
-| Seed Data (~30 assets + 4 deliberate topological errors) | Phase 3 | Planned |
-| NestJS Foundation, Swagger & Health Checks | Phase 4 | Planned |
-| Asset CRUD, DTOs & Validation | Phase 5 | Planned |
-| Spatial Queries (BBOX, Within Polygon, Nearest with KNN) | Phase 6 | Planned |
+| Schema Migration, Enums, Constraints & Spatial Indexes | Phase 2 | ✅ Completed |
+| Seed Data (~30 assets + 4 deliberate topological errors) | Phase 3 | ✅ Completed |
+| NestJS Foundation, Swagger & Health Checks | Phase 4 | ✅ Completed |
+| Asset CRUD, DTOs & Validation | Phase 5 | ✅ Completed |
+| Spatial Queries (BBOX, Within Polygon, Nearest with KNN) | Phase 6 | ✅ Completed |
 | Topological Validation Report Endpoint | Phase 7 | Planned |
 | Frontend Shell, ArcGIS MapView & Symbology | Phase 8 | Planned |
 | Asset Details & Editing Panel | Phase 9 | Planned |
@@ -105,3 +105,38 @@ The database container includes PostGIS 3.4 and runs on port `5432` with a built
 5. Spatial bounding box (`bbox`) queries are capped at 5000 records.
 6. OpenStreetMap tiles are used for demonstration purposes without requiring proprietary API tokens.
 7. Docker configuration assumes the client browser runs on the same host machine.
+
+---
+
+## 7. Spatial Index Proof & Query Analysis (D4)
+
+### A. Honest Planner Analysis (Degrees Index: `idx_assets_geom`)
+With ~30 rows in the dataset, all table data fits within a single disk block buffer (`Buffers: shared hit=1`). Under normal cost optimization, PostgreSQL deliberately selects a Sequential Scan because traversing an index tree introduces unnecessary I/O overhead for small tables:
+
+```text
+Seq Scan on assets (cost=0.00..434.62 rows=33 width=66) (actual time=0.078..0.128 rows=33 loops=1)
+  Filter: st_intersects(geom, '...'::geometry)
+  Buffers: shared hit=1
+```
+
+By instructing the planner to disable sequential scans (`SET enable_seqscan = off;`), the planner demonstrates that `idx_assets_geom` is valid, available, and utilized:
+
+```text
+Index Scan using idx_assets_geom on assets (cost=0.14..442.00 rows=33 width=66) (actual time=0.275..0.421 rows=33 loops=1)
+  Index Cond: (geom && '...'::geometry)
+  Filter: st_intersects(geom, '...'::geometry)
+  Buffers: shared hit=26
+```
+
+### B. KNN Distance Index (`idx_assets_geom_geography`)
+For k-nearest-neighbour queries (`GET /api/assets/nearest`), PostgreSQL leverages the expression index `idx_assets_geom_geography` directly via the `<->` distance operator even with small row counts:
+
+```text
+-> Index Scan using idx_assets_geom_geography on assets a (cost=0.14..450.42 rows=33 width=82)
+     Order By: ((geom)::geography <-> '...'::geography)
+     Buffers: shared hit=183
+```
+
+### C. Geometric Correctness: `ST_Intersects` vs. `&&`
+Unlike simple bounding box overlap (`&&`) which produces false positives for diagonal features crossing corners of a bounding envelope, our implementation uses `ST_Intersects(geom, ST_MakeEnvelope(...))` to guarantee that diagonal pipes whose bounding box touches the extent without crossing the actual line geometry are **not** returned.
+
