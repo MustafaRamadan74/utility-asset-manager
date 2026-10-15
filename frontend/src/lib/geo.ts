@@ -52,23 +52,39 @@ export function assetToGraphic(asset: Asset): Graphic {
   return new Graphic({
     geometry,
     symbol: getAssetSymbol(asset.type, asset.status),
-    attributes: { ...asset },
+    attributes: {
+      ...asset,
+      rawGeometry: JSON.stringify(asset.geometry),
+    },
   });
 }
 
 /**
  * Creates a highlight Graphic for selected assets.
  */
-export function assetToSelectionGraphic(asset: Asset): Graphic {
+export function assetToSelectionGraphic(asset: Asset): Graphic | null {
+  if (!asset) return null;
+
+  let geom = asset.geometry;
+  if (!geom && (asset as any).rawGeometry) {
+    try {
+      geom = JSON.parse((asset as any).rawGeometry);
+    } catch {}
+  }
+
+  if (!geom || !(geom as any).coordinates) {
+    return null;
+  }
+
   let geometry: __esri.Geometry;
 
   if (asset.type === 'PIPE') {
     geometry = new Polyline({
-      paths: [(asset.geometry as any).coordinates],
+      paths: [(geom as any).coordinates],
       spatialReference: { wkid: 4326 },
     });
   } else {
-    const coords = (asset.geometry as any).coordinates;
+    const coords = (geom as any).coordinates;
     geometry = new Point({
       longitude: coords[0],
       latitude: coords[1],

@@ -5,22 +5,27 @@ import { Asset, AssetStatus, AssetType } from '../types/asset';
 import { api, ApiError } from '../lib/api';
 
 interface AssetFormProps {
-  asset: Asset;
+  asset?: Asset | null;
+  initialPoint?: [number, number] | null;
   onClose: () => void;
-  onSaveSuccess: (updatedAsset: Asset) => void;
-  onDeleteSuccess: (deletedId: string) => void;
+  onSaveSuccess: (savedAsset: Asset) => void;
+  onDeleteSuccess?: (deletedId: string) => void;
 }
 
 export default function AssetForm({
   asset,
+  initialPoint,
   onClose,
   onSaveSuccess,
   onDeleteSuccess,
 }: AssetFormProps) {
-  const [name, setName] = useState(asset.name);
-  const [status, setStatus] = useState<AssetStatus>(asset.status);
+  const isCreateMode = !asset && !!initialPoint;
+
+  const [type, setType] = useState<AssetType>(asset?.type || 'VALVE');
+  const [name, setName] = useState(asset?.name || '');
+  const [status, setStatus] = useState<AssetStatus>(asset?.status || 'ACTIVE');
   const [diameterMm, setDiameterMm] = useState<string>(
-    asset.diameter_mm !== null && asset.diameter_mm !== undefined
+    asset?.diameter_mm !== null && asset?.diameter_mm !== undefined
       ? asset.diameter_mm.toString()
       : '',
   );
@@ -30,18 +35,26 @@ export default function AssetForm({
   const [errorMessages, setErrorMessages] = useState<string[]>([]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Sync state whenever selected asset changes
+  // Sync state whenever selected asset or initialPoint changes
   useEffect(() => {
-    setName(asset.name);
-    setStatus(asset.status);
-    setDiameterMm(
-      asset.diameter_mm !== null && asset.diameter_mm !== undefined
-        ? asset.diameter_mm.toString()
-        : '',
-    );
+    if (asset) {
+      setType(asset.type);
+      setName(asset.name);
+      setStatus(asset.status);
+      setDiameterMm(
+        asset.diameter_mm !== null && asset.diameter_mm !== undefined
+          ? asset.diameter_mm.toString()
+          : '',
+      );
+    } else if (initialPoint) {
+      setType('VALVE');
+      setName('');
+      setStatus('ACTIVE');
+      setDiameterMm('');
+    }
     setErrorMessages([]);
     setSuccessMessage(null);
-  }, [asset]);
+  }, [asset, initialPoint]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,34 +68,54 @@ export default function AssetForm({
       return;
     }
 
-    const payload: {
-      name: string;
-      status: AssetStatus;
-      diameter_mm?: number;
-    } = {
-      name: trimmedName,
-      status,
-    };
-
-    if (asset.type === 'PIPE') {
-      const parsedDiameter = parseInt(diameterMm, 10);
-      if (isNaN(parsedDiameter) || parsedDiameter <= 0) {
-        setErrorMessages(['Diameter is required and must be a positive integer for pipes']);
-        return;
-      }
-      payload.diameter_mm = parsedDiameter;
-    }
-
     setIsSaving(true);
     try {
-      const updated = await api.updateAsset(asset.id, payload);
-      setSuccessMessage('Asset updated successfully');
-      onSaveSuccess(updated);
+      if (isCreateMode && initialPoint) {
+        // Create new asset (F3)
+        const newAsset = await api.createAsset({
+          name: trimmedName,
+          type,
+          status,
+          diameter_mm: null,
+          geometry: {
+            type: 'Point',
+            coordinates: initialPoint,
+          },
+        });
+        setSuccessMessage('Asset created successfully');
+        onSaveSuccess(newAsset);
+      } else if (asset) {
+        // Update existing asset (F2)
+        const payload: {
+          name: string;
+          status: AssetStatus;
+          diameter_mm?: number;
+        } = {
+          name: trimmedName,
+          status,
+        };
+
+        if (asset.type === 'PIPE') {
+          const parsedDiameter = parseInt(diameterMm, 10);
+          if (isNaN(parsedDiameter) || parsedDiameter <= 0) {
+            setErrorMessages([
+              'Diameter is required and must be a positive integer for pipes',
+            ]);
+            setIsSaving(false);
+            return;
+          }
+          payload.diameter_mm = parsedDiameter;
+        }
+
+        const updated = await api.updateAsset(asset.id, payload);
+        setSuccessMessage('Asset updated successfully');
+        onSaveSuccess(updated);
+      }
     } catch (err: any) {
       if (err instanceof ApiError) {
         setErrorMessages(err.messages);
       } else {
-        setErrorMessages([err.message || 'Failed to update asset']);
+        setErrorMessages([err.message || 'Operation failed']);
       }
     } finally {
       setIsSaving(false);
@@ -90,6 +123,8 @@ export default function AssetForm({
   };
 
   const handleDelete = async () => {
+    if (!asset || !onDeleteSuccess) return;
+
     const confirmed = window.confirm(
       `Are you sure you want to delete asset "${asset.name}" (${asset.id})?\nThis action cannot be undone.`,
     );
@@ -110,8 +145,8 @@ export default function AssetForm({
     }
   };
 
-  const getBadgeClass = (type: AssetType) => {
-    switch (type) {
+  const getBadgeClass = (t: AssetType) => {
+    switch (t) {
       case 'PIPE':
         return 'badge badge-pipe';
       case 'VALVE':
@@ -124,7 +159,10 @@ export default function AssetForm({
   };
 
   const formatGeometry = () => {
-    if (!asset.geometry) return 'None';
+    if (isCreateMode && initialPoint) {
+      return `Point [${initialPoint[0].toFixed(5)}, ${initialPoint[1].toFixed(5)}]`;
+    }
+    if (!asset?.geometry) return 'None';
     if (asset.geometry.type === 'Point') {
       const [lng, lat] = asset.geometry.coordinates;
       return `Point [${lng.toFixed(5)}, ${lat.toFixed(5)}]`;
@@ -136,13 +174,21 @@ export default function AssetForm({
   };
 
   return (
-    <aside className="side-drawer" aria-label="Asset Details">
+    <aside
+      className="side-drawer"
+      aria-label={isCreateMode ? 'Create Asset' : 'Asset Details'}
+    >
       {/* Header */}
       <div className="drawer-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span className={getBadgeClass(asset.type)}>{asset.type}</span>
-          <span className="drawer-title" title={asset.name}>
-            {asset.name}
+          <span className={getBadgeClass(type)}>
+            {isCreateMode ? `NEW ${type}` : type}
+          </span>
+          <span
+            className="drawer-title"
+            title={isCreateMode ? 'Add New Asset' : asset?.name}
+          >
+            {isCreateMode ? 'Add New Asset' : asset?.name}
           </span>
         </div>
         <button
@@ -160,7 +206,14 @@ export default function AssetForm({
         {/* Error notification banner */}
         {errorMessages.length > 0 && (
           <div className="form-errors-box" role="alert">
-            <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '6px', color: '#f43f5e' }}>
+            <div
+              style={{
+                fontWeight: 600,
+                fontSize: '13px',
+                marginBottom: '6px',
+                color: '#f43f5e',
+              }}
+            >
               Validation Error ({errorMessages.length})
             </div>
             {errorMessages.map((msg, idx) => (
@@ -178,7 +231,7 @@ export default function AssetForm({
           </div>
         )}
 
-        {/* Read-only asset metadata */}
+        {/* Asset metadata / location */}
         <div
           style={{
             background: 'var(--bg-card)',
@@ -192,38 +245,68 @@ export default function AssetForm({
             gap: '6px',
           }}
         >
+          {!isCreateMode && asset && (
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Asset ID:</span>
+              <span
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--text-dim)',
+                  fontSize: '11px',
+                  maxWidth: '200px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+                title={asset.id}
+              >
+                {asset.id}
+              </span>
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: 'var(--text-muted)' }}>Asset ID:</span>
+            <span style={{ color: 'var(--text-muted)' }}>
+              {isCreateMode ? 'Target Location:' : 'Location:'}
+            </span>
             <span
               style={{
-                fontFamily: 'var(--font-mono)',
                 color: 'var(--text-dim)',
-                fontSize: '11px',
-                maxWidth: '200px',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
+                fontFamily: 'var(--font-mono)',
               }}
-              title={asset.id}
             >
-              {asset.id}
-            </span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: 'var(--text-muted)' }}>Location:</span>
-            <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
               {formatGeometry()}
             </span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: 'var(--text-muted)' }}>Last Updated:</span>
-            <span style={{ color: 'var(--text-dim)' }}>
-              {new Date(asset.updated_at).toLocaleString()}
-            </span>
-          </div>
+          {!isCreateMode && asset && (
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Last Updated:</span>
+              <span style={{ color: 'var(--text-dim)' }}>
+                {new Date(asset.updated_at).toLocaleString()}
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Edit Form */}
+        {/* Edit / Create Form */}
         <form onSubmit={handleSave}>
+          {/* Asset Type (Selectable in create mode, immutable in edit mode) */}
+          {isCreateMode && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="create-type-select">
+                Asset Type <span style={{ color: '#f43f5e' }}>*</span>
+              </label>
+              <select
+                id="create-type-select"
+                className="form-select"
+                value={type}
+                onChange={(e) => setType(e.target.value as AssetType)}
+                disabled={isSaving}
+              >
+                <option value="VALVE">VALVE (Control Point)</option>
+                <option value="HYDRANT">HYDRANT (Fire Service Point)</option>
+              </select>
+            </div>
+          )}
+
           {/* Asset Name */}
           <div className="form-group">
             <label className="form-label" htmlFor="asset-name-input">
@@ -235,7 +318,9 @@ export default function AssetForm({
               className="form-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Main Distribution Pipe 01"
+              placeholder={
+                isCreateMode ? 'e.g. Valve V-12 or Hydrant H-15' : 'Asset name'
+              }
               required
               disabled={isSaving || isDeleting}
             />
@@ -260,7 +345,7 @@ export default function AssetForm({
           </div>
 
           {/* Diameter (Conditional for PIPE per D2/D5) */}
-          {asset.type === 'PIPE' && (
+          {!isCreateMode && asset?.type === 'PIPE' && (
             <div className="form-group">
               <label className="form-label" htmlFor="asset-diameter-input">
                 Pipe Diameter (mm) <span style={{ color: '#f43f5e' }}>*</span>
@@ -277,44 +362,71 @@ export default function AssetForm({
                 required
                 disabled={isSaving || isDeleting}
               />
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+              <span
+                style={{
+                  fontSize: '11px',
+                  color: 'var(--text-muted)',
+                  marginTop: '4px',
+                  display: 'block',
+                }}
+              >
                 Required positive integer (&gt; 0 mm)
               </span>
             </div>
           )}
 
           {/* Action Buttons */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '24px' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              marginTop: '24px',
+            }}
+          >
             <button
               type="submit"
               className="btn-action btn-primary"
-              style={{ justifyContent: 'center', width: '100%', padding: '10px' }}
+              style={{
+                justifyContent: 'center',
+                width: '100%',
+                padding: '10px',
+              }}
               disabled={isSaving || isDeleting}
             >
               {isSaving ? (
                 <>
-                  <div className="spinner" /> Saving Changes...
+                  <div className="spinner" />{' '}
+                  {isCreateMode ? 'Creating Asset...' : 'Saving Changes...'}
                 </>
+              ) : isCreateMode ? (
+                '➕ Create Asset'
               ) : (
                 '💾 Save Changes'
               )}
             </button>
 
-            <button
-              type="button"
-              className="btn-action btn-danger"
-              style={{ justifyContent: 'center', width: '100%', padding: '10px' }}
-              onClick={handleDelete}
-              disabled={isSaving || isDeleting}
-            >
-              {isDeleting ? (
-                <>
-                  <div className="spinner" /> Deleting Asset...
-                </>
-              ) : (
-                '🗑️ Delete Asset'
-              )}
-            </button>
+            {!isCreateMode && onDeleteSuccess && (
+              <button
+                type="button"
+                className="btn-action btn-danger"
+                style={{
+                  justifyContent: 'center',
+                  width: '100%',
+                  padding: '10px',
+                }}
+                onClick={handleDelete}
+                disabled={isSaving || isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <div className="spinner" /> Deleting Asset...
+                  </>
+                ) : (
+                  '🗑️ Delete Asset'
+                )}
+              </button>
+            )}
           </div>
         </form>
       </div>
