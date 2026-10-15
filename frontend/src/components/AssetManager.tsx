@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import {
   Asset,
@@ -11,7 +11,7 @@ import {
   ValidationFeature,
   ValidationReport,
 } from '../types/asset';
-import { api } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import AssetForm from './AssetForm';
 import SelectionTable from './SelectionTable';
 import ValidationList from './ValidationList';
@@ -36,6 +36,14 @@ const MapView = dynamic(() => import('./MapView'), {
     </div>
   ),
 });
+
+interface ToastNotification {
+  id: number;
+  type: 'success' | 'error' | 'warning' | 'info';
+  title: string;
+  message?: string;
+  reason?: string;
+}
 
 export default function AssetManager() {
   const [mode, setMode] = useState<InteractionMode>('VIEW');
@@ -67,13 +75,39 @@ export default function AssetManager() {
   // Mobile menu dropdown state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  // Undo status state
+  const [undoStatus, setUndoStatus] = useState<{
+    canUndo: boolean;
+    lastAction?: string;
+    lastAssetName?: string;
+  }>({ canUndo: false });
+
+  // 5-second Toast Notification state
+  const [toast, setToast] = useState<ToastNotification | null>(null);
+  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const showToast = (
+    type: 'success' | 'error' | 'warning' | 'info',
+    title: string,
+    message?: string,
+    reason?: string,
+  ) => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setToast({ id: Date.now(), type, title, message, reason });
+    toastTimeoutRef.current = setTimeout(() => {
+      setToast(null);
+    }, 5000); // exactly 5 seconds duration as requested
+  };
+
   const [filters, setFilters] = useState<{
     type?: AssetType;
     status?: AssetStatus;
   }>({});
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // Fetch summary data on mount and on changes
+  // Fetch summary data
   const loadSummary = async () => {
     try {
       const data = await api.getSummary();
@@ -83,9 +117,40 @@ export default function AssetManager() {
     }
   };
 
+  // Fetch undo status
+  const loadUndoStatus = async () => {
+    try {
+      const status = await api.getUndoStatus();
+      setUndoStatus(status);
+    } catch (err) {
+      console.error('Failed to check undo status:', err);
+    }
+  };
+
   useEffect(() => {
     loadSummary();
+    loadUndoStatus();
   }, [refreshTrigger]);
+
+  const handleUndo = async () => {
+    setIsLoading(true);
+    try {
+      const res = await api.undo();
+      showToast('success', 'Operation Undone', res.message);
+      setRefreshTrigger((prev) => prev + 1);
+      loadSummary();
+      loadUndoStatus();
+      if (res.asset) {
+        setSelectedAsset(res.asset);
+      }
+    } catch (err: any) {
+      const reason =
+        err instanceof ApiError ? err.messages.join(', ') : err.message;
+      showToast('error', 'Undo Failed', undefined, reason);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleRunValidation = async () => {
     setIsLoading(true);
@@ -97,8 +162,15 @@ export default function AssetManager() {
       setSelectedAsset(null);
       setCreatePoint(null);
       setCreatePipeCoords(null);
+      showToast(
+        'info',
+        'Topological Validation',
+        `Analyzed network: found ${report.features.length} issue(s).`,
+      );
     } catch (err: any) {
-      alert(`Validation failed: ${err.message}`);
+      const reason =
+        err instanceof ApiError ? err.messages.join(', ') : err.message;
+      showToast('error', 'Validation Failed', undefined, reason);
     } finally {
       setIsLoading(false);
     }
@@ -107,15 +179,6 @@ export default function AssetManager() {
   const handleClearIssues = () => {
     setValidationReport(null);
     setShowValidationList(false);
-  };
-
-  const handleClearSelection = () => {
-    setSelectedAsset(null);
-    setSelectedAssets([]);
-    setCreatePoint(null);
-    setCreatePipeCoords(null);
-    setShowSelectionTable(false);
-    setMode('VIEW');
   };
 
   const handleSelectTableRowClick = (asset: Asset) => {
@@ -143,14 +206,46 @@ export default function AssetManager() {
 
   return (
     <div className="app-container">
+      {/* 5-Second Operation Toast Notification */}
+      {toast && (
+        <div className={`floating-toast toast-${toast.type}`} role="alert">
+          <div className="toast-icon">
+            {toast.type === 'success'
+              ? '✓'
+              : toast.type === 'error'
+                ? '✕'
+                : '⚠️'}
+          </div>
+          <div className="toast-body">
+            <div className="toast-title">{toast.title}</div>
+            {toast.message && (
+              <div className="toast-message">{toast.message}</div>
+            )}
+            {toast.reason && (
+              <div className="toast-reason">Reason: {toast.reason}</div>
+            )}
+          </div>
+          <button
+            type="button"
+            className="toast-close"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
+          <div className="toast-progress-bar" />
+        </div>
+      )}
+
       {/* Header Bar */}
       <header className="app-header">
+        {/* Left: Brand Section */}
         <div className="brand-section">
           <div className="brand-title">Utility Asset Manager</div>
         </div>
 
-        {/* Desktop Controls (Hidden on mobile via CSS) */}
-        <div className="header-controls desktop-controls">
+        {/* Center: Exactly Centered Mode Buttons (Align Center without overflow) */}
+        <div className="navbar-center-controls desktop-only">
           <div className="button-group">
             <button
               className={`btn-toggle ${mode === 'VIEW' ? 'active' : ''}`}
@@ -191,19 +286,36 @@ export default function AssetManager() {
               <button
                 className={`btn-toggle ${addAssetSubtype === 'POINT' ? 'active' : ''}`}
                 onClick={() => setAddAssetSubtype('POINT')}
-                title="Click on map to place a Valve or Hydrant point"
+                title="Click on map to place a Valve or Hydrant point (snapping enabled)"
               >
                 📍 Point
               </button>
               <button
                 className={`btn-toggle ${addAssetSubtype === 'PIPE' ? 'active' : ''}`}
                 onClick={() => setAddAssetSubtype('PIPE')}
-                title="Click and drag/double-click on map to draw a Pipe polyline"
+                title="Click and double-click to draw a Pipe (snapping enabled)"
               >
                 📏 Pipe
               </button>
             </div>
           )}
+        </div>
+
+        {/* Right: Actions, Filters & Undo */}
+        <div className="navbar-right-controls desktop-only">
+          {/* Undo Action Button */}
+          <button
+            className="btn-undo"
+            onClick={handleUndo}
+            disabled={isLoading || !undoStatus.canUndo}
+            title={
+              undoStatus.canUndo
+                ? `Undo last action: ${undoStatus.lastAction} ${undoStatus.lastAssetName || ''}`
+                : 'No actions to undo'
+            }
+          >
+            ↩️ Undo
+          </button>
 
           {/* Type Filter */}
           <select
@@ -245,12 +357,12 @@ export default function AssetManager() {
             onClick={handleRunValidation}
             disabled={isLoading}
           >
-            🛡️ Run Validation
+            🛡️ Validation
           </button>
 
           {validationReport && (
             <button className="btn-action" onClick={handleClearIssues}>
-              Clear Issues ({validationReport.features.length})
+              Clear ({validationReport.features.length})
             </button>
           )}
         </div>
@@ -327,6 +439,19 @@ export default function AssetManager() {
               ✏️ Select Polygon
             </button>
           </div>
+
+          <div className="mobile-section-label">History &amp; Actions</div>
+          <button
+            className="btn-undo"
+            style={{ width: '100%', justifyContent: 'center', marginBottom: '8px' }}
+            onClick={() => {
+              handleUndo();
+              setIsMobileMenuOpen(false);
+            }}
+            disabled={isLoading || !undoStatus.canUndo}
+          >
+            ↩️ Undo Last Change
+          </button>
 
           <div className="mobile-section-label">Filters</div>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
@@ -411,8 +536,8 @@ export default function AssetManager() {
           {mode === 'ADD_ASSET' && (
             <div className="drawing-guide-pill">
               {addAssetSubtype === 'PIPE'
-                ? '📏 Click on map to place pipe vertices, double-click to finish'
-                : '📍 Click anywhere on the map to place a Valve or Hydrant'}
+                ? '📏 Click to place vertices (snaps to points within 5m), double-click to finish'
+                : '📍 Click anywhere to place point (🧲 Snapping active within 5m)'}
             </div>
           )}
         </div>
@@ -613,8 +738,15 @@ export default function AssetManager() {
               setSelectedAsset(null);
               setCreatePoint(null);
               setCreatePipeCoords(null);
+              showToast(
+                'info',
+                'Polygon Query',
+                `Found ${matching.length} assets intersecting polygon.`,
+              );
             } catch (err: any) {
-              alert(`Selection query failed: ${err.message}`);
+              const reason =
+                err instanceof ApiError ? err.messages.join(', ') : err.message;
+              showToast('error', 'Polygon Query Failed', undefined, reason);
             } finally {
               setIsLoading(false);
             }
@@ -630,11 +762,26 @@ export default function AssetManager() {
               setSelectedAsset(updated);
               setRefreshTrigger((prev) => prev + 1);
               loadSummary();
+              loadUndoStatus();
+              showToast(
+                'success',
+                'Asset Updated',
+                `Asset "${updated.name}" was updated successfully.`,
+              );
             }}
-            onDeleteSuccess={() => {
+            onDeleteSuccess={(deletedId, assetName) => {
               setSelectedAsset(null);
               setRefreshTrigger((prev) => prev + 1);
               loadSummary();
+              loadUndoStatus();
+              showToast(
+                'success',
+                'Asset Deleted',
+                `Asset "${assetName || deletedId}" was deleted. Click Undo to restore.`,
+              );
+            }}
+            onError={(title, message) => {
+              showToast('error', title, undefined, message);
             }}
           />
         )}
@@ -650,6 +797,15 @@ export default function AssetManager() {
               setSelectedAsset(created);
               setRefreshTrigger((prev) => prev + 1);
               loadSummary();
+              loadUndoStatus();
+              showToast(
+                'success',
+                'Asset Created',
+                `New ${created.type} "${created.name}" was successfully placed.`,
+              );
+            }}
+            onError={(title, message) => {
+              showToast('error', title, undefined, message);
             }}
           />
         )}
@@ -665,6 +821,15 @@ export default function AssetManager() {
               setSelectedAsset(created);
               setRefreshTrigger((prev) => prev + 1);
               loadSummary();
+              loadUndoStatus();
+              showToast(
+                'success',
+                'Pipe Created',
+                `New Pipe "${created.name}" (${created.diameter_mm}mm) was successfully drawn and saved.`,
+              );
+            }}
+            onError={(title, message) => {
+              showToast('error', title, undefined, message);
             }}
           />
         )}

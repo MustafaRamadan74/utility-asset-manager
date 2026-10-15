@@ -171,4 +171,37 @@ export const api = {
   async getSummary(): Promise<NetworkSummary> {
     return request<NetworkSummary>(`${API_BASE}/assets/summary`);
   },
+
+  /**
+   * Check if there are actions to undo.
+   */
+  async getUndoStatus(): Promise<{
+    canUndo: boolean;
+    lastAction?: string;
+    lastAssetName?: string;
+  }> {
+    return request<{
+      canUndo: boolean;
+      lastAction?: string;
+      lastAssetName?: string;
+    }>(`${API_BASE}/assets/undo/status`);
+  },
+
+  /**
+   * Revert the most recent operation (CREATE, UPDATE, DELETE).
+   */
+  async undo(): Promise<{
+    undoneAction: string;
+    message: string;
+    asset?: Asset;
+  }> {
+    return request<{
+      undoneAction: string;
+      message: string;
+      asset?: Asset;
+    }>(`${API_BASE}/assets/undo`, {
+      method: 'POST',
+    });
+  },
 };
+

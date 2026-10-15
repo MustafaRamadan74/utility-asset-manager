@@ -58,7 +58,9 @@ export class AssetsService {
         createDto.diameter_mm ?? null,
         JSON.stringify(createDto.geometry),
       ]);
-      return result[0];
+      const created = result[0];
+      await this.logUndoAction('CREATE', created.id, created.name, created.type, created);
+      return created;
     } catch (error) {
       this.handleDatabaseError(error);
     }
@@ -271,6 +273,15 @@ export class AssetsService {
     `;
 
     try {
+      // Log previous state for UNDO
+      await this.logUndoAction(
+        'UPDATE',
+        existing.id,
+        existing.name,
+        existing.type,
+        existing,
+      );
+
       const result = await this.dataSource.query(sql, [
         mergedName,
         mergedStatus,
@@ -288,8 +299,156 @@ export class AssetsService {
    * Delete an asset by UUID.
    */
   async remove(id: string): Promise<{ deleted: boolean; id: string }> {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
+    await this.logUndoAction(
+      'DELETE',
+      existing.id,
+      existing.name,
+      existing.type,
+      existing,
+    );
     await this.dataSource.query('DELETE FROM assets WHERE id = $1;', [id]);
     return { deleted: true, id };
+  }
+
+  /**
+   * Helper to log an action into asset_undo_logs table.
+   */
+  private async logUndoAction(
+    action: 'CREATE' | 'UPDATE' | 'DELETE',
+    assetId: string,
+    assetName: string,
+    assetType: string,
+    snapshot: any,
+  ): Promise<void> {
+    try {
+      await this.dataSource.query(
+        `INSERT INTO asset_undo_logs (action, asset_id, asset_name, asset_type, snapshot)
+         VALUES ($1, $2, $3, $4, $5);`,
+        [action, assetId, assetName, assetType, JSON.stringify(snapshot)],
+      );
+    } catch (err) {
+      console.error('Failed to log undo action:', err);
+    }
+  }
+
+  /**
+   * Check if there are actions to undo.
+   */
+  async getUndoStatus(): Promise<{
+    canUndo: boolean;
+    lastAction?: string;
+    lastAssetName?: string;
+  }> {
+    const rows = await this.dataSource.query(
+      `SELECT action, asset_name FROM asset_undo_logs ORDER BY created_at DESC LIMIT 1;`,
+    );
+    if (!rows || rows.length === 0) {
+      return { canUndo: false };
+    }
+    return {
+      canUndo: true,
+      lastAction: rows[0].action,
+      lastAssetName: rows[0].asset_name,
+    };
+  }
+
+  /**
+   * Revert the most recent asset operation.
+   */
+  async undo(): Promise<{
+    undoneAction: string;
+    message: string;
+    asset?: Asset;
+  }> {
+    const rows = await this.dataSource.query(
+      `SELECT * FROM asset_undo_logs ORDER BY created_at DESC LIMIT 1;`,
+    );
+    if (!rows || rows.length === 0) {
+      throw new BadRequestException(['No actions available to undo']);
+    }
+
+    const log = rows[0];
+    const snapshot =
+      typeof log.snapshot === 'string'
+        ? JSON.parse(log.snapshot)
+        : log.snapshot;
+
+    if (log.action === 'CREATE') {
+      // Revert CREATE by deleting the created asset
+      await this.dataSource.query('DELETE FROM assets WHERE id = $1;', [
+        log.asset_id,
+      ]);
+      await this.dataSource.query('DELETE FROM asset_undo_logs WHERE id = $1;', [
+        log.id,
+      ]);
+      return {
+        undoneAction: 'CREATE',
+        message: `Undid creation of ${log.asset_type.toLowerCase()} "${log.asset_name}"`,
+      };
+    } else if (log.action === 'DELETE') {
+      // Revert DELETE by re-inserting the exact deleted asset
+      const sql = `
+        INSERT INTO assets (id, type, name, status, diameter_mm, geom, created_at, updated_at)
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          ST_SetSRID(ST_GeomFromGeoJSON($6), 4326),
+          $7,
+          NOW()
+        )
+        RETURNING ${ASSET_COLUMNS};
+      `;
+      const result = await this.dataSource.query(sql, [
+        snapshot.id,
+        snapshot.type,
+        snapshot.name,
+        snapshot.status,
+        snapshot.diameter_mm ?? null,
+        JSON.stringify(snapshot.geometry),
+        snapshot.created_at || new Date().toISOString(),
+      ]);
+      await this.dataSource.query('DELETE FROM asset_undo_logs WHERE id = $1;', [
+        log.id,
+      ]);
+      return {
+        undoneAction: 'DELETE',
+        message: `Restored deleted ${log.asset_type.toLowerCase()} "${log.asset_name}"`,
+        asset: result[0],
+      };
+    } else if (log.action === 'UPDATE') {
+      // Revert UPDATE by restoring snapshot state
+      const sql = `
+        UPDATE assets
+        SET
+          name = $1,
+          status = $2,
+          diameter_mm = $3,
+          geom = ST_SetSRID(ST_GeomFromGeoJSON($4), 4326),
+          updated_at = NOW()
+        WHERE id = $5
+        RETURNING ${ASSET_COLUMNS};
+      `;
+      const result = await this.dataSource.query(sql, [
+        snapshot.name,
+        snapshot.status,
+        snapshot.diameter_mm ?? null,
+        JSON.stringify(snapshot.geometry),
+        snapshot.id,
+      ]);
+      await this.dataSource.query('DELETE FROM asset_undo_logs WHERE id = $1;', [
+        log.id,
+      ]);
+      return {
+        undoneAction: 'UPDATE',
+        message: `Reverted updates to ${log.asset_type.toLowerCase()} "${log.asset_name}"`,
+        asset: result[0],
+      };
+    }
+
+    throw new BadRequestException(['Unknown undo action']);
   }
 }

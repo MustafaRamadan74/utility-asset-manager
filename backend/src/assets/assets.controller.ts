@@ -132,6 +132,28 @@ export class AssetsController {
     return this.assetsService.getSummary();
   }
 
+  // --- Undo Routes (Declared BEFORE :id routes per D5) ---
+
+  @Get('undo/status')
+  @ApiOperation({
+    summary: 'Check if there is an action that can be undone',
+    description: 'Returns the status and last action available in asset_undo_logs.',
+  })
+  async getUndoStatus() {
+    return this.assetsService.getUndoStatus();
+  }
+
+  @Post('undo')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Undo the last operation (CREATE, UPDATE, DELETE)',
+    description:
+      'Reverts the most recent asset operation using the audit history log.',
+  })
+  async undo() {
+    return this.assetsService.undo();
+  }
+
   // --- ID Routes (Declared AFTER specific routes per D5) ---
 
   @Get(':id')

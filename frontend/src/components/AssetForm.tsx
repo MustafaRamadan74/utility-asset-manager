@@ -10,7 +10,8 @@ interface AssetFormProps {
   initialPipeCoordinates?: [number, number][] | null;
   onClose: () => void;
   onSaveSuccess: (savedAsset: Asset) => void;
-  onDeleteSuccess?: (deletedId: string) => void;
+  onDeleteSuccess?: (deletedId: string, assetName?: string) => void;
+  onError?: (title: string, message: string) => void;
 }
 
 export default function AssetForm({
@@ -20,6 +21,7 @@ export default function AssetForm({
   onClose,
   onSaveSuccess,
   onDeleteSuccess,
+  onError,
 }: AssetFormProps) {
   const isCreateMode = !asset && (!!initialPoint || !!initialPipeCoordinates);
   const isCreatingPipe = !asset && !!initialPipeCoordinates;
@@ -39,6 +41,7 @@ export default function AssetForm({
 
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [errorMessages, setErrorMessages] = useState<string[]>([]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -66,6 +69,7 @@ export default function AssetForm({
     }
     setErrorMessages([]);
     setSuccessMessage(null);
+    setShowDeleteModal(false);
   }, [asset, initialPoint, initialPipeCoordinates]);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -156,24 +160,23 @@ export default function AssetForm({
     }
   };
 
-  const handleDelete = async () => {
+  const confirmDelete = async () => {
     if (!asset || !onDeleteSuccess) return;
-
-    const confirmed = window.confirm(
-      `Are you sure you want to delete asset "${asset.name}" (${asset.id})?\nThis action cannot be undone.`,
-    );
-    if (!confirmed) return;
 
     setErrorMessages([]);
     setIsDeleting(true);
     try {
       await api.deleteAsset(asset.id);
-      onDeleteSuccess(asset.id);
+      setShowDeleteModal(false);
+      onDeleteSuccess(asset.id, asset.name);
     } catch (err: any) {
-      if (err instanceof ApiError) {
-        setErrorMessages(err.messages);
-      } else {
-        setErrorMessages([err.message || 'Failed to delete asset']);
+      const msgs =
+        err instanceof ApiError
+          ? err.messages
+          : [err.message || 'Failed to delete asset'];
+      setErrorMessages(msgs);
+      if (onError) {
+        onError('Deletion Failed', msgs.join(', '));
       }
       setIsDeleting(false);
     }
@@ -467,21 +470,62 @@ export default function AssetForm({
                   width: '100%',
                   padding: '10px',
                 }}
-                onClick={handleDelete}
+                onClick={() => setShowDeleteModal(true)}
                 disabled={isSaving || isDeleting}
               >
-                {isDeleting ? (
-                  <>
-                    <div className="spinner" /> Deleting Asset...
-                  </>
-                ) : (
-                  '🗑️ Delete Asset'
-                )}
+                🗑️ Delete Asset
               </button>
             )}
           </div>
         </form>
       </div>
+
+      {/* Delete Confirmation Warning Modal in Screen Center */}
+      {showDeleteModal && asset && (
+        <div className="warning-modal-backdrop" role="dialog" aria-modal="true">
+          <div className="warning-modal-card">
+            <div className="warning-modal-badge">
+              <span className="warning-pulse-icon">⚠️</span>
+            </div>
+            <h3 className="warning-modal-title">Confirm Asset Deletion</h3>
+            <p className="warning-modal-text">
+              Are you sure you want to delete{' '}
+              <strong style={{ color: '#f8fafc' }}>"{asset.name}"</strong>?
+            </p>
+            <p className="warning-modal-subtext">
+              Type: <strong>{asset.type}</strong> | Status: <strong>{asset.status}</strong>
+              <br />
+              This will remove the asset from the GIS network. You can undo this action immediately after.
+            </p>
+            <div className="warning-modal-actions">
+              <button
+                type="button"
+                className="btn-action"
+                style={{ flex: 1, justifyContent: 'center' }}
+                onClick={() => setShowDeleteModal(false)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-action btn-danger"
+                style={{ flex: 1, justifyContent: 'center' }}
+                onClick={confirmDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <div className="spinner" /> Deleting...
+                  </>
+                ) : (
+                  '🗑️ Yes, Delete'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

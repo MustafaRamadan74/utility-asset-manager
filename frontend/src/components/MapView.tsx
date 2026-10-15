@@ -44,6 +44,30 @@ interface MapViewComponentProps {
   zoomLocation?: { center: [number, number]; zoom?: number; timestamp: number } | null;
 }
 
+interface SnapCandidate {
+  lng: number;
+  lat: number;
+  label: string;
+}
+
+function getDistanceMeters(
+  lng1: number,
+  lat1: number,
+  lng2: number,
+  lat2: number,
+): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 export default function MapViewComponent({
   mode,
   addAssetSubtype = 'POINT',
@@ -65,8 +89,13 @@ export default function MapViewComponent({
   const assetsLayerRef = useRef<GraphicsLayer | null>(null);
   const selectionLayerRef = useRef<GraphicsLayer | null>(null);
   const issuesLayerRef = useRef<GraphicsLayer | null>(null);
+  const snapLayerRef = useRef<GraphicsLayer | null>(null);
   const sketchVmRef = useRef<SketchViewModel | null>(null);
   const activeAbortControllerRef = useRef<AbortController | null>(null);
+
+  // Snapping candidates and active snap target
+  const snapCandidatesRef = useRef<SnapCandidate[]>([]);
+  const activeSnapPointRef = useRef<[number, number] | null>(null);
 
   // Keep latest props in refs for event callbacks
   const modeRef = useRef(mode);
@@ -82,6 +111,34 @@ export default function MapViewComponent({
   const onPolygonDrawnRef = useRef(onPolygonDrawn);
   onPolygonDrawnRef.current = onPolygonDrawn;
 
+  const updateSnapCandidates = (assets: Asset[]) => {
+    const candidates: SnapCandidate[] = [];
+    for (const a of assets) {
+      if (a.geometry.type === 'Point') {
+        candidates.push({
+          lng: a.geometry.coordinates[0],
+          lat: a.geometry.coordinates[1],
+          label: `${a.type} (${a.name})`,
+        });
+      } else if (a.geometry.type === 'LineString') {
+        const coords = a.geometry.coordinates;
+        if (coords.length > 0) {
+          candidates.push({
+            lng: coords[0][0],
+            lat: coords[0][1],
+            label: `Pipe Start (${a.name})`,
+          });
+          candidates.push({
+            lng: coords[coords.length - 1][0],
+            lat: coords[coords.length - 1][1],
+            label: `Pipe End (${a.name})`,
+          });
+        }
+      }
+    }
+    snapCandidatesRef.current = candidates;
+  };
+
   // Initialize MapView once on mount
   useEffect(() => {
     if (!mapDivRef.current) return;
@@ -94,14 +151,16 @@ export default function MapViewComponent({
       copyright: '© OpenStreetMap contributors (Demo Use Only)',
     });
 
-    // 2. Separate Graphics Layers (D7)
+    // 2. Separate Graphics Layers (D7) + Snapping Layer
     const assetsLayer = new GraphicsLayer({ title: 'Assets Layer' });
     const selectionLayer = new GraphicsLayer({ title: 'Selection Layer' });
     const issuesLayer = new GraphicsLayer({ title: 'Issues Layer' });
+    const snapLayer = new GraphicsLayer({ title: 'Snap Layer' });
 
     assetsLayerRef.current = assetsLayer;
     selectionLayerRef.current = selectionLayer;
     issuesLayerRef.current = issuesLayer;
+    snapLayerRef.current = snapLayer;
 
     // 3. Map with OSM basemap and graphic layers
     const basemap = new Basemap({
@@ -112,17 +171,17 @@ export default function MapViewComponent({
 
     const map = new Map({
       basemap,
-      layers: [assetsLayer, selectionLayer, issuesLayer],
+      layers: [assetsLayer, selectionLayer, issuesLayer, snapLayer],
     });
 
-    // 4. MapView centered around New Administrative Capital [lng 31.762, lat 30.021]
+    // 4. MapView without zoom buttons and without compass as requested
     const view = new MapView({
       container: mapDivRef.current,
       map,
       center: [31.762, 30.021],
       zoom: 16,
       ui: {
-        components: ['zoom', 'compass'],
+        components: [], // D1: Compass and Zoom in/out buttons removed
       },
     });
     viewRef.current = view;
@@ -198,6 +257,35 @@ export default function MapViewComponent({
               }
             }
 
+            // Snapping tolerance check for start and end vertices (1-5m)
+            for (const c of snapCandidatesRef.current) {
+              if (
+                getDistanceMeters(
+                  deduplicatedCoords[0][0],
+                  deduplicatedCoords[0][1],
+                  c.lng,
+                  c.lat,
+                ) <= 5.0
+              ) {
+                deduplicatedCoords[0] = [c.lng, c.lat];
+                break;
+              }
+            }
+            const lastIdx = deduplicatedCoords.length - 1;
+            for (const c of snapCandidatesRef.current) {
+              if (
+                getDistanceMeters(
+                  deduplicatedCoords[lastIdx][0],
+                  deduplicatedCoords[lastIdx][1],
+                  c.lng,
+                  c.lat,
+                ) <= 5.0
+              ) {
+                deduplicatedCoords[lastIdx] = [c.lng, c.lat];
+                break;
+              }
+            }
+
             // Zero-length pipes validation (at least 2 distinct points required)
             if (deduplicatedCoords.length < 2) {
               alert(
@@ -243,6 +331,8 @@ export default function MapViewComponent({
           assetsLayerRef.current.addMany(graphics);
         }
 
+        updateSnapCandidates(assets);
+
         const isCapped = assets.length >= 5000;
         onAssetsLoaded(assets.length, isCapped);
       } catch (err: any) {
@@ -256,7 +346,88 @@ export default function MapViewComponent({
       }
     });
 
-    // 7. Click listener handling interaction modes (D7)
+    // 7. Interactive Snapping watcher on pointer-move (1 to 5 meters tolerance)
+    const pointerMoveHandle = view.on('pointer-move', (event) => {
+      if (modeRef.current !== 'ADD_ASSET') {
+        if (activeSnapPointRef.current) {
+          activeSnapPointRef.current = null;
+          snapLayerRef.current?.removeAll();
+        }
+        return;
+      }
+
+      const mapPoint = view.toMap({ x: event.x, y: event.y });
+      if (!mapPoint) return;
+
+      const geoPoint = webMercatorUtils.webMercatorToGeographic(
+        mapPoint,
+      ) as Point;
+      const currentLng = geoPoint.longitude;
+      const currentLat = geoPoint.latitude;
+
+      let nearestCandidate: SnapCandidate | null = null;
+      let minDistance = 5.0; // 5 meters tolerance
+
+      for (const c of snapCandidatesRef.current) {
+        const dist = getDistanceMeters(currentLng, currentLat, c.lng, c.lat);
+        if (dist <= minDistance) {
+          minDistance = dist;
+          nearestCandidate = c;
+        }
+      }
+
+      if (nearestCandidate) {
+        activeSnapPointRef.current = [nearestCandidate.lng, nearestCandidate.lat];
+        if (snapLayerRef.current) {
+          snapLayerRef.current.removeAll();
+          const snapGraphic = new Graphic({
+            geometry: new Point({
+              longitude: nearestCandidate.lng,
+              latitude: nearestCandidate.lat,
+            }),
+            symbol: {
+              type: 'simple-marker',
+              style: 'circle',
+              color: [56, 189, 248, 0.4],
+              size: 22,
+              outline: {
+                color: [245, 158, 11, 1],
+                width: 2.5,
+              },
+            } as any,
+          });
+
+          const textGraphic = new Graphic({
+            geometry: new Point({
+              longitude: nearestCandidate.lng,
+              latitude: nearestCandidate.lat,
+            }),
+            symbol: {
+              type: 'text',
+              text: `🧲 Snapped (${minDistance.toFixed(1)}m)`,
+              color: '#38bdf8',
+              haloColor: '#0f172a',
+              haloSize: 2,
+              font: {
+                size: 11,
+                weight: 'bold',
+                family: 'Inter, sans-serif',
+              },
+              yoffset: 16,
+            } as any,
+          });
+
+          snapLayerRef.current.addMany([snapGraphic, textGraphic]);
+        }
+      } else {
+        if (activeSnapPointRef.current) {
+          activeSnapPointRef.current = null;
+          snapLayerRef.current?.removeAll();
+        }
+      }
+    });
+
+    // 8. Click listener handling interaction modes (D7)
     const clickHandle = view.on('click', async (event) => {
       const currentMode = modeRef.current;
 
@@ -283,14 +454,18 @@ export default function MapViewComponent({
         currentMode === 'ADD_ASSET' &&
         addAssetSubtypeRef.current === 'POINT'
       ) {
-        // Point placement for creating asset
-        const geoPoint = webMercatorUtils.webMercatorToGeographic(
-          event.mapPoint,
-        ) as Point;
-        const lng = parseFloat(geoPoint.longitude.toFixed(6));
-        const lat = parseFloat(geoPoint.latitude.toFixed(6));
-        if (onMapClickPointRef.current) {
-          onMapClickPointRef.current([lng, lat]);
+        // Point placement for creating asset - snap if near candidate
+        if (activeSnapPointRef.current && onMapClickPointRef.current) {
+          onMapClickPointRef.current(activeSnapPointRef.current);
+        } else {
+          const geoPoint = webMercatorUtils.webMercatorToGeographic(
+            event.mapPoint,
+          ) as Point;
+          const lng = parseFloat(geoPoint.longitude.toFixed(6));
+          const lat = parseFloat(geoPoint.latitude.toFixed(6));
+          if (onMapClickPointRef.current) {
+            onMapClickPointRef.current([lng, lat]);
+          }
         }
       }
     });
@@ -298,6 +473,7 @@ export default function MapViewComponent({
     // Cleanup: Destroy MapView on component unmount (D7)
     return () => {
       stationaryHandle.remove();
+      pointerMoveHandle.remove();
       clickHandle.remove();
       if (sketchVmRef.current) sketchVmRef.current.destroy();
       if (view) view.destroy();
@@ -379,6 +555,7 @@ export default function MapViewComponent({
           assetsLayerRef.current.removeAll();
           assetsLayerRef.current.addMany(assets.map(assetToGraphic));
         }
+        updateSnapCandidates(assets);
         onAssetsLoaded(assets.length, assets.length >= 5000);
       })
       .catch((err) => {
