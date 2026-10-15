@@ -9,7 +9,7 @@ async function bootstrap() {
   // Global API route prefix
   app.setGlobalPrefix('api');
 
-  // Global DTO validation pipe (D5)
+  // Global DTO validation pipe
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

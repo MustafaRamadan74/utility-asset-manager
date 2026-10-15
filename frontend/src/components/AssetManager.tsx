@@ -16,7 +16,7 @@ import AssetForm from './AssetForm';
 import SelectionTable from './SelectionTable';
 import ValidationList from './ValidationList';
 
-// Dynamic import with SSR disabled inside Client Component (D7)
+// Dynamic import with SSR disabled inside Client Component
 const MapView = dynamic(() => import('./MapView'), {
   ssr: false,
   loading: () => (
@@ -67,7 +67,7 @@ export default function AssetManager() {
   const [isCapped, setIsCapped] = useState(false);
   const [assetCount, setAssetCount] = useState(0);
 
-  // Network summary metrics (B4)
+  // Network summary metrics
   const [summary, setSummary] = useState<NetworkSummary | null>(null);
   const [activeTab, setActiveTab] = useState<'LEGEND' | 'SUMMARY'>('LEGEND');
   const [isHudMinimized, setIsHudMinimized] = useState(false);
@@ -359,12 +359,6 @@ export default function AssetManager() {
           >
             🛡️ Validation
           </button>
-
-          {validationReport && (
-            <button className="btn-action" onClick={handleClearIssues}>
-              Clear ({validationReport.features.length})
-            </button>
-          )}
         </div>
 
         {/* Mobile 3-dash Hamburger button */}
@@ -491,7 +485,7 @@ export default function AssetManager() {
           <div className="mobile-section-label">Network Validation</div>
           <button
             className="btn-action btn-primary"
-            style={{ width: '100%', justifyContent: 'center', marginBottom: '8px' }}
+            style={{ width: '100%', justifyContent: 'center' }}
             onClick={() => {
               handleRunValidation();
               setIsMobileMenuOpen(false);
@@ -500,19 +494,6 @@ export default function AssetManager() {
           >
             🛡️ Run Validation
           </button>
-
-          {validationReport && (
-            <button
-              className="btn-action"
-              style={{ width: '100%', justifyContent: 'center' }}
-              onClick={() => {
-                handleClearIssues();
-                setIsMobileMenuOpen(false);
-              }}
-            >
-              Clear Issues ({validationReport.features.length})
-            </button>
-          )}
         </div>
       )}
 
@@ -753,7 +734,7 @@ export default function AssetManager() {
           }}
         />
 
-        {/* Asset Details & Editing Side Panel (Phase 9 - F2) */}
+        {/* Asset Details & Editing Side Panel */}
         {selectedAsset && (
           <AssetForm
             asset={selectedAsset}
@@ -786,7 +767,7 @@ export default function AssetManager() {
           />
         )}
 
-        {/* Add Point Asset Side Panel (Phase 10 - F3) */}
+        {/* Add Point Asset Side Panel */}
         {createPoint && (
           <AssetForm
             initialPoint={createPoint}
@@ -810,7 +791,7 @@ export default function AssetManager() {
           />
         )}
 
-        {/* Add Pipe Asset Side Panel (Phase 11 - Pipe Drawing) */}
+        {/* Add Pipe Asset Side Panel */}
         {createPipeCoords && (
           <AssetForm
             initialPipeCoordinates={createPipeCoords}
@@ -834,7 +815,7 @@ export default function AssetManager() {
           />
         )}
 
-        {/* Polygon Selected Assets Table (Phase 10 - F4) */}
+        {/* Polygon Selected Assets Table */}
         {showSelectionTable && selectedAssets.length > 0 && (
           <SelectionTable
             assets={selectedAssets}
@@ -846,7 +827,7 @@ export default function AssetManager() {
           />
         )}
 
-        {/* Topological Validation Issues List (Phase 10 - F5) */}
+        {/* Topological Validation Issues List */}
         {showValidationList && validationReport && (
           <ValidationList
             report={validationReport}

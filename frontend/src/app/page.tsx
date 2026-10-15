@@ -1,7 +1,7 @@
 import AssetManager from '../components/AssetManager';
 
 /**
- * Server Component page (D7).
+ * Server Component page.
  * Renders the interactive AssetManager client component.
  */
 export default function HomePage() {

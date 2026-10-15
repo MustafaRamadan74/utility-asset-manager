@@ -1,5 +1,5 @@
 /**
- * Shared SQL column list ensuring consistent Asset shape across all spatial queries (D3).
+ * Shared SQL column list ensuring consistent Asset shape across all spatial queries.
  * Casts geom to GeoJSON format aliased as 'geometry'.
  */
 export const ASSET_COLUMNS = `

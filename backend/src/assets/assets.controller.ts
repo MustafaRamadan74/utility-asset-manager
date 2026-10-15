@@ -64,11 +64,11 @@ export class AssetsController {
     return this.assetsService.findAll(query);
   }
 
-  // --- Spatial Query Routes (Declared BEFORE :id routes per D5) ---
+  // --- Spatial Query Routes (Declared BEFORE :id routes to prevent collision) ---
 
   @Get('nearest')
   @ApiOperation({
-    summary: 'Find nearest assets to a geographic coordinate (D4)',
+    summary: 'Find nearest assets to a geographic coordinate',
     description:
       'Finds nearest assets to [lng, lat] with geodesic distance calculated in metres on the spheroid.',
   })
@@ -87,7 +87,7 @@ export class AssetsController {
   @Post('query/within')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Query assets within a GeoJSON Polygon (D4)',
+    summary: 'Query assets within a GeoJSON Polygon',
     description:
       'The request body is the GeoJSON Polygon itself. Returns all intersecting utility assets.',
   })
@@ -124,7 +124,7 @@ export class AssetsController {
 
   @Get('summary')
   @ApiOperation({
-    summary: 'Get network summary statistics (B4)',
+    summary: 'Get network summary statistics',
     description:
       'Returns aggregate counts by type and status, along with total pipe network length calculated in metres via PostGIS geography.',
   })
@@ -132,7 +132,7 @@ export class AssetsController {
     return this.assetsService.getSummary();
   }
 
-  // --- Undo Routes (Declared BEFORE :id routes per D5) ---
+  // --- Undo Routes (Declared BEFORE :id routes to prevent collision) ---
 
   @Get('undo/status')
   @ApiOperation({
@@ -154,7 +154,7 @@ export class AssetsController {
     return this.assetsService.undo();
   }
 
-  // --- ID Routes (Declared AFTER specific routes per D5) ---
+  // --- ID Routes (Declared AFTER specific routes) ---
 
   @Get(':id')
   @ApiOperation({

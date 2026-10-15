@@ -17,7 +17,7 @@ function isValidCoordinate(pos: any): pos is [number, number] {
 }
 
 /**
- * Validates GeoJSON geometry against asset type and coordinate boundaries (D6).
+ * Validates GeoJSON geometry against asset type and coordinate boundaries.
  * Throws BadRequestException with an array of specific error messages if invalid.
  */
 export function validateAssetGeometry(type: AssetType, geom: any): void {
@@ -58,7 +58,7 @@ export function validateAssetGeometry(type: AssetType, geom: any): void {
 }
 
 /**
- * Validates a GeoJSON Polygon for spatial within queries (D6).
+ * Validates a GeoJSON Polygon for spatial within queries.
  */
 export function validatePolygonGeometry(geom: any): void {
   const errors: string[] = [];

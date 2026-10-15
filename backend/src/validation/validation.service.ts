@@ -7,7 +7,7 @@ export class ValidationService {
   constructor(private readonly dataSource: DataSource) {}
 
   /**
-   * Generates a GeoJSON FeatureCollection validation report (D4).
+   * Generates a GeoJSON FeatureCollection validation report.
    * Runs two topological integrity rules implemented directly in PostGIS:
    * 1. VALVE_NOT_ON_PIPE (> 1 m from any pipe)
    * 2. DANGLING_PIPE_END (endpoint not within 1 m of another pipe, valve, or hydrant)

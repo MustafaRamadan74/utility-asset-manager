@@ -143,7 +143,7 @@ export default function MapViewComponent({
   useEffect(() => {
     if (!mapDivRef.current) return;
 
-    // 1. Basemap using OpenStreetMap WebTileLayer (D7 - no API token required)
+    // 1. Basemap using OpenStreetMap WebTileLayer (no API token required)
     const osmLayer = new WebTileLayer({
       urlTemplate:
         'https://{subDomain}.tile.openstreetmap.org/{level}/{col}/{row}.png',
@@ -151,7 +151,7 @@ export default function MapViewComponent({
       copyright: '© OpenStreetMap contributors (Demo Use Only)',
     });
 
-    // 2. Separate Graphics Layers (D7) + Snapping Layer
+    // 2. Separate Graphics Layers + Snapping Layer
     const assetsLayer = new GraphicsLayer({ title: 'Assets Layer' });
     const selectionLayer = new GraphicsLayer({ title: 'Selection Layer' });
     const issuesLayer = new GraphicsLayer({ title: 'Issues Layer' });
@@ -181,12 +181,12 @@ export default function MapViewComponent({
       center: [31.762, 30.021],
       zoom: 16,
       ui: {
-        components: [], // D1: Compass and Zoom in/out buttons removed
+        components: [], // Compass and Zoom in/out buttons removed
       },
     });
     viewRef.current = view;
 
-    // 5. SketchViewModel for drawing polygons & pipes (D7 / F3)
+    // 5. SketchViewModel for drawing polygons & pipes
     const sketchVM = new SketchViewModel({
       view,
       layer: selectionLayer,
@@ -303,7 +303,7 @@ export default function MapViewComponent({
       }
     });
 
-    // 6. Extent stationary watcher: Reload assets on pan/zoom (D7)
+    // 6. Extent stationary watcher: Reload assets on pan/zoom
     const stationaryHandle = view.watch('stationary', async (stationary) => {
       if (!stationary || !view.extent) return;
 
@@ -337,7 +337,7 @@ export default function MapViewComponent({
         onAssetsLoaded(assets.length, isCapped);
       } catch (err: any) {
         if (err.name === 'AbortError') {
-          // Stale request aborted - expected behaviour (D7)
+          // Stale request aborted - expected behaviour
           return;
         }
         console.error('Failed to load assets for extent:', err);
@@ -427,7 +427,7 @@ export default function MapViewComponent({
       }
     });
 
-    // 8. Click listener handling interaction modes (D7)
+    // 8. Click listener handling interaction modes
     const clickHandle = view.on('click', async (event) => {
       const currentMode = modeRef.current;
 
@@ -470,7 +470,7 @@ export default function MapViewComponent({
       }
     });
 
-    // Cleanup: Destroy MapView on component unmount (D7)
+    // Cleanup: Destroy MapView on component unmount
     return () => {
       stationaryHandle.remove();
       pointerMoveHandle.remove();

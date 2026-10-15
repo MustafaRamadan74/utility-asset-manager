@@ -20,7 +20,7 @@ const COLORS = {
 };
 
 /**
- * Returns ArcGIS symbol definition for an asset based on type and operational status (D7).
+ * Returns ArcGIS symbol definition for an asset based on type and operational status.
  * Decommissioned assets are styled as dashed lines (pipes) or hollow markers (valves/hydrants).
  */
 export function getAssetSymbol(type: AssetType, status: AssetStatus): any {
@@ -130,7 +130,7 @@ export function getSelectionSymbol(type: AssetType): any {
 }
 
 /**
- * Symbol for displaying topological validation issues on the map (D4/D7).
+ * Symbol for displaying topological validation issues on the map.
  */
 export function getValidationIssueSymbol(rule: ValidationRule): any {
   if (rule === 'VALVE_NOT_ON_PIPE') {

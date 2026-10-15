@@ -3,8 +3,6 @@
 .env.local
 .env.*.local
 
-# Confidential / Playbook files
-Utility_Asset_Manager_Execution_Playbook.md
 
 # Dependencies
 node_modules/

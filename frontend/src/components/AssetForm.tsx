@@ -123,7 +123,7 @@ export default function AssetForm({
           onSaveSuccess(newAsset);
         }
       } else if (asset) {
-        // Update existing asset (F2)
+        // Update existing asset
         const payload: {
           name: string;
           status: AssetStatus;
@@ -399,7 +399,7 @@ export default function AssetForm({
             </select>
           </div>
 
-          {/* Diameter (Conditional for PIPE per D2/D5) */}
+          {/* Diameter (Conditional for PIPE) */}
           {((isCreateMode && isCreatingPipe) || (!isCreateMode && asset?.type === 'PIPE')) && (
             <div className="form-group">
               <label className="form-label" htmlFor="asset-diameter-input">

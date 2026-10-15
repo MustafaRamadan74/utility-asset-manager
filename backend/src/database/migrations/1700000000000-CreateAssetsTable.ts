@@ -25,7 +25,7 @@ export class CreateAssetsTable1700000000000 implements MigrationInterface {
       END $$;
     `);
 
-    // 3. Create assets table with explicit NOT NULL columns and D2 CHECK constraints
+    // 3. Create assets table with explicit NOT NULL columns and CHECK constraints
     await queryRunner.query(`
       CREATE TABLE assets (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -49,7 +49,7 @@ export class CreateAssetsTable1700000000000 implements MigrationInterface {
       );
     `);
 
-    // 4. Create GiST indexes (D1: primary geometry index + expression geography index)
+    // 4. Create GiST indexes (primary geometry index + expression geography index)
     await queryRunner.query(`
       CREATE INDEX idx_assets_geom ON assets USING GIST (geom);
     `);

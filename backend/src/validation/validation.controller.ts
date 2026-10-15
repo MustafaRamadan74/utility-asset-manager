@@ -10,7 +10,7 @@ export class ValidationController {
 
   @Get('report')
   @ApiOperation({
-    summary: 'Generate network topological validation report (D4)',
+    summary: 'Generate network topological validation report',
     description:
       'Evaluates water utility network topological rules directly in PostGIS: 1. VALVE_NOT_ON_PIPE, 2. DANGLING_PIPE_END. Returns a GeoJSON FeatureCollection containing all detected issues.',
   })

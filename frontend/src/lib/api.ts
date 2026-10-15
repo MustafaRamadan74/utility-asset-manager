@@ -74,7 +74,7 @@ async function request<T>(
 
 export const api = {
   /**
-   * Fetch assets by bounding box and optional type/status filters (D4/D7).
+   * Fetch assets by bounding box and optional type/status filters.
    */
   async getAssetsByBBox(
     bbox: string,
@@ -131,7 +131,7 @@ export const api = {
   },
 
   /**
-   * Query assets intersecting a GeoJSON Polygon (D4).
+   * Query assets intersecting a GeoJSON Polygon.
    */
   async queryWithin(polygon: GeoJSONPolygon): Promise<Asset[]> {
     return request<Asset[]>(`${API_BASE}/assets/query/within`, {
@@ -159,14 +159,14 @@ export const api = {
   },
 
   /**
-   * Fetch topological validation report (D4).
+   * Fetch topological validation report.
    */
   async getValidationReport(): Promise<ValidationReport> {
     return request<ValidationReport>(`${API_BASE}/validation/report`);
   },
 
   /**
-   * Fetch aggregate network summary metrics and total pipe length (B4).
+   * Fetch aggregate network summary metrics and total pipe length.
    */
   async getSummary(): Promise<NetworkSummary> {
     return request<NetworkSummary>(`${API_BASE}/assets/summary`);

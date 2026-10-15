@@ -17,7 +17,7 @@ import { AssetStatus, AssetType } from '../asset.types';
 export class IsDiameterValidConstraint implements ValidatorConstraintInterface {
   validate(diameter: any, args: ValidationArguments): boolean {
     const obj = args.object as any;
-    // When updating, 'type' is omitted in UpdateAssetDto; merge & re-validation is enforced in AssetsService (D5)
+    // When updating, 'type' is omitted in UpdateAssetDto; merge & re-validation is enforced in AssetsService
     if (obj.type === undefined) {
       return true;
     }

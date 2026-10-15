@@ -9,8 +9,6 @@
 
 A modern, full-stack Web GIS application designed for engineering teams to view, inspect, edit, spatially query, and topologically validate water utility networks (pipes, valves, hydrants).
 
-Built as a technical assessment for **StrategizeIT** (GIS Full-Stack Developer).
-
 ---
 
 ## 📑 Table of Contents
@@ -19,11 +17,11 @@ Built as a technical assessment for **StrategizeIT** (GIS Full-Stack Developer).
 3. [Quick Start & Running Options](#3-quick-start--running-options)
    - [Option A: One-Command Docker Setup (Recommended)](#option-a-one-command-docker-setup-recommended)
    - [Option B: Manual Local Development](#option-b-manual-local-development)
-4. [Key Architectural & Engineering Decisions (D1 – D8)](#4-key-architectural--engineering-decisions-d1--d8)
+4. [Key Design Decisions](#4-key-design-decisions)
 5. [Server Components vs. Client Components in Next.js](#5-server-components-vs-client-components-in-nextjs)
 6. [Spatial Index Proof & Query Optimization](#6-spatial-index-proof--query-optimization)
 7. [API Documentation Summary](#7-api-documentation-summary)
-8. [Requirement Traceability Matrix](#8-requirement-traceability-matrix)
+8. [Feature Overview](#8-feature-overview)
 9. [Assumptions](#9-assumptions)
 10. [What I Would Do With More Time](#10-what-i-would-do-with-more-time)
 
@@ -139,14 +137,14 @@ If you prefer to run services natively on your host machine:
 
 ---
 
-## 4. Key Architectural & Engineering Decisions (D1 – D8)
+## 4. Key Design Decisions
 
-### D1. Degrees vs. Metres (Geographic vs. Geodetic Distance)
+### Degrees vs. Metres (Geographic vs. Geodetic Distance)
 - **Problem**: Geometries are stored in WGS 84 (`EPSG:4326`) in angular units (degrees). Calculating distance or buffer thresholds using plain geometry in degrees (`ST_Distance` or `ST_DWithin`) produces distorted results that vary by latitude.
 - **Solution**: All metric calculations cast the geometry to PostGIS `geography` (`geom::geography`), calculating geodesic distances in **metres** along the spheroid.
 - **Index Support**: A standard GiST index on `geom` cannot index a cast expression. Therefore, we created a **second functional GiST index on the expression** `((geom::geography))`. Queries use the exact matching expression to ensure index traversal.
 
-### D2. Defensive Database Schema
+### Defensive Database Schema
 The database defends itself against corrupted inputs at the lowest level:
 ```sql
 CONSTRAINT chk_name CHECK (length(btrim(name)) > 0),
@@ -163,10 +161,10 @@ CONSTRAINT chk_pipe_diameter CHECK (
 - Every critical column is explicitly `NOT NULL`.
 - `updated_at` is automatically updated via a PostgreSQL trigger function (`trigger_set_timestamp`).
 
-### D3. Raw Parameterized SQL for Spatial Queries
+### Raw Parameterized SQL for Spatial Queries
 While TypeORM is used for `DataSource` connection pooling and migration management, all spatial queries use raw SQL via `dataSource.query(sql, [params])`. This eliminates ORM impedance mismatches with PostGIS geometry types and ensures direct use of spatial indexes while completely preventing SQL injection.
 
-### D4. PostGIS Topological Validation Engine
+### PostGIS Topological Validation Engine
 Topological network validation is executed directly in the database engine:
 1. **`VALVE_NOT_ON_PIPE`**: Identifies valves whose geodetic distance is greater than 1 metre from any pipe:
    ```sql
@@ -191,20 +189,20 @@ Topological network validation is executed directly in the database engine:
    ```
 Both rule results are transformed into a standard GeoJSON `FeatureCollection` with distinct problem geometries and detailed property payloads.
 
-### D5. Immutability of Asset Type & Merge-and-Revalidate Rule
+### Immutability of Asset Type & Merge-and-Revalidate Rule
 - Asset `type` (e.g. `PIPE` vs `VALVE`) is **immutable** after creation to preserve relational integrity and spatial constraints.
 - In `PATCH /api/assets/:id`, the incoming payload is partial. The service loads the existing database row, merges the new attributes with the existing state, and re-validates the entire merged object (e.g. ensuring a pipe cannot be updated to diameter 0 or null, and a valve cannot receive a diameter).
 
-### D6. Multi-Tier Validation
+### Multi-Tier Validation
 1. **DTO Layer**: `class-validator` enforces type rules, non-empty trimmed strings, valid enums, and positive integers.
 2. **Geometry Utility (`geometry.util.ts`)**: Validates GeoJSON structure, coordinates array bounds (longitude [-180, 180], latitude [-90, 90]), position count, and polygon ring closure.
-3. **Database Constraints (D2)**: Guarantees data validity even against direct SQL modifications.
+3. **Database Constraints**: Guarantees data validity even against direct SQL modifications.
 
-### D7. Cartographic Symbology & Stale Request Cancellation
+### Cartographic Symbology & Stale Request Cancellation
 - **Symbology**: Active pipes (solid blue), decommissioned pipes (dashed slate grey), active valves (emerald green), active hydrants (crimson diamond), decommissioned points (hollow desaturated markers).
 - **Network In-Flight Abort**: When panning or zooming quickly across the map, an `AbortController` cleanly cancels in-flight extent requests before initiating a new one, avoiding race conditions and backend congestion.
 
-### D8. Networking & Dual-Environment Resolution
+### Networking & Dual-Environment Resolution
 - Client browser interacts with `http://localhost:3001/api` (`NEXT_PUBLIC_API_URL`, baked at Next.js build time).
 - Inside Docker, the backend connects to `db:5432` through the internal container network.
 - Cross-Origin Resource Sharing (CORS) is explicitly configured via environment variable `CORS_ORIGIN=http://localhost:3000`.
@@ -278,27 +276,28 @@ The backend exposes an interactive Swagger OpenAPI documentation portal at `http
 | `GET` | `/api/assets/nearest` | KNN spatial search with geodesic distance in metres | `lng`, `lat`, `limit` (1–50) |
 | `POST` | `/api/assets/query/within` | Find assets intersecting a user-drawn polygon | Body: GeoJSON Polygon object |
 | `GET` | `/api/assets/:id` | Retrieve an asset by UUID | Path: `id` (UUID) |
-| `PATCH` | `/api/assets/:id` | Partial update with D5 merge-and-revalidate rule | Path: `id`, Body: `{ name?, status?, diameter_mm? }` |
+| `PATCH` | `/api/assets/:id` | Partial update with merge-and-revalidate rule | Path: `id`, Body: `{ name?, status?, diameter_mm? }` |
 | `DELETE` | `/api/assets/:id` | Delete an asset by UUID | Path: `id` (UUID) |
 | `GET` | `/api/validation/report` | Topological network validation report | None (returns GeoJSON FeatureCollection) |
 
 ---
 
-## 8. Requirement Traceability Matrix
+## 8. Feature Overview
 
-| Requirement | Implementation Component | Status |
-|---|---|:---:|
-| **PostGIS Container & Config** | `docker-compose.yml`, `.env.example`, PostGIS 3.4 | ✅ Completed (Phase 1) |
-| **Schema Migration & Constraints** | `backend/src/database/migrations/*`, DDL with 4 CHECKs | ✅ Completed (Phase 2) |
-| **Seeded Utility Network** | `backend/src/database/seed.ts` (30 assets + 4 deliberate errors) | ✅ Completed (Phase 3) |
-| **NestJS Foundation & Swagger** | `backend/src/main.ts`, global prefix, `ValidationPipe`, Swagger | ✅ Completed (Phase 4) |
-| **CRUD & Multi-Layer Validation** | `AssetsController`, `AssetsService`, `geometry.util.ts`, DTOs | ✅ Completed (Phase 5) |
-| **Spatial Queries (BBOX, Within, KNN)** | Raw SQL templates, KNN `<->` index, `ST_MakeValid` | ✅ Completed (Phase 6) |
-| **Topological Validation Report** | `ValidationService`, `VALVE_NOT_ON_PIPE`, `DANGLING_PIPE_END` | ✅ Completed (Phase 7) |
-| **Frontend Map & Symbology** | Next.js App Router, `@arcgis/core`, OSM WebTileLayer | ✅ Completed (Phase 8) |
-| **Asset Details & Editing Panel** | `AssetForm.tsx`, `PATCH` merge rule, `DELETE` with confirm | ✅ Completed (Phase 9) |
-| **Add Asset, Polygon Selection & UI** | Point placement, `SketchViewModel`, `SelectionTable`, `ValidationList` | ✅ Completed (Phase 10) |
-| **Production Docker & Delivery** | Multi-service Dockerfiles, Level A README, v1.0.0 Tag | ✅ Completed (Phase 11) |
+| Feature | Where it is implemented |
+|---|---|
+| **PostGIS Spatial Database** | `docker-compose.yml`, PostGIS 3.4, migration DDL with constraints |
+| **Database Migrations & Constraints** | `backend/src/database/migrations/*` |
+| **Seeded Utility Network** | `backend/src/database/seed.ts` (30 assets + 4 intentional topological errors) |
+| **NestJS Foundation & Swagger** | `backend/src/main.ts`, global prefix, `ValidationPipe`, Swagger docs |
+| **CRUD & Multi-Layer Validation** | `AssetsController`, `AssetsService`, `geometry.util.ts`, DTOs |
+| **Spatial Queries (BBOX, Within, KNN)** | Raw SQL templates, KNN `<->` index, `ST_MakeValid` |
+| **Topological Validation Engine** | `ValidationService`, `VALVE_NOT_ON_PIPE`, `DANGLING_PIPE_END` |
+| **Interactive GIS Map & Symbology** | Next.js App Router, `@arcgis/core`, OSM WebTileLayer |
+| **Asset Details, Editing & Undo** | `AssetForm.tsx`, `AssetManager.tsx`, audit history undo system |
+| **Add Asset & Pipe Drawing** | Point placement, interactive polyline drawing with 5m snapping |
+| **Spatial Polygon Selection** | `SketchViewModel`, spatial within query, polygon selection table |
+| **Production Docker Setup** | Multi-service Dockerfiles and `docker-compose.yml` |
 
 ---
 
@@ -309,8 +308,8 @@ The backend exposes an interactive Swagger OpenAPI documentation portal at `http
 3. **Full Network Participation**: All network assets (including `DECOMMISSIONED`) participate in topological validation queries.
 4. **Tolerance**: The spatial connectivity tolerance for water network topology is 1.0 metre.
 5. **Bounding Box Cap**: Bounding box queries are capped at 5000 records to prevent browser memory exhaustion.
-6. **OpenStreetMap Attributions**: OSM tiles are loaded via `WebTileLayer` for evaluation and demonstration purposes without requiring commercial API tokens.
-7. **Networking**: The Docker Compose configuration assumes the evaluation browser runs on the same host machine as the Docker daemon (`localhost`).
+6. **OpenStreetMap Attributions**: OSM tiles are loaded via `WebTileLayer` for demonstration purposes without requiring commercial API tokens.
+7. **Networking**: The Docker Compose configuration assumes the client browser runs on the same host machine as the Docker daemon (`localhost`).
 
 ---
 

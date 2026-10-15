@@ -19,7 +19,7 @@ export class AssetsService {
   constructor(private readonly dataSource: DataSource) {}
 
   /**
-   * Helper to execute queries and map database constraint errors to 400 (D5).
+   * Helper to execute queries and map database constraint errors to 400.
    */
   private handleDatabaseError(error: any): never {
     if (error?.code === '23514') {
@@ -67,7 +67,7 @@ export class AssetsService {
   }
 
   /**
-   * List assets with optional filtering by type, status, and bbox (D4).
+   * List assets with optional filtering by type, status, and bbox.
    */
   async findAll(query: ListAssetsQueryDto): Promise<Asset[]> {
     const conditions: string[] = ['1=1'];
@@ -126,7 +126,7 @@ export class AssetsService {
   }
 
   /**
-   * Find assets intersecting a GeoJSON Polygon (D4).
+   * Find assets intersecting a GeoJSON Polygon.
    * Uses ST_MakeValid to guard against self-intersecting polygons.
    */
   async findWithin(polygon: any): Promise<Asset[]> {
@@ -143,7 +143,7 @@ export class AssetsService {
   }
 
   /**
-   * Find nearest assets using KNN operator (<->) and exact geodesic distance in metres (D4).
+   * Find nearest assets using KNN operator (<->) and exact geodesic distance in metres.
    */
   async findNearest(
     lng: number,
@@ -172,7 +172,7 @@ export class AssetsService {
   }
 
   /**
-   * Get network summary metrics and total pipe length in metres (B4).
+   * Get network summary metrics and total pipe length in metres.
    */
   async getSummary(): Promise<{
     totalAssets: number;
@@ -219,7 +219,7 @@ export class AssetsService {
   }
 
   /**
-   * Update an asset (D5 merge and re-validate rule).
+   * Update an asset (merge and re-validate rule).
    */
   async update(id: string, updateDto: UpdateAssetDto): Promise<Asset> {
     const existing = await this.findOne(id);

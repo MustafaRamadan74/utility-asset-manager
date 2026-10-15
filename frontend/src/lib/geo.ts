@@ -10,7 +10,7 @@ import {
 } from './symbols';
 
 /**
- * Converts a MapView Web Mercator extent to a clamped WGS84 bbox query string (D7).
+ * Converts a MapView Web Mercator extent to a clamped WGS84 bbox query string.
  * Format: minX,minY,maxX,maxY (lngMin,latMin,lngMax,latMax).
  */
 export function extentToBbox(extent: __esri.Extent): string {
