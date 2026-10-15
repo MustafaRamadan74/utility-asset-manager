@@ -146,6 +146,19 @@ export function getValidationIssueSymbol(rule: ValidationRule): any {
     };
   }
 
+  if (rule === 'DUPLICATE_POINTS') {
+    return {
+      type: 'simple-marker',
+      style: 'cross',
+      color: [168, 85, 247, 1],
+      size: 14,
+      outline: {
+        color: [255, 255, 255, 1],
+        width: 2,
+      },
+    };
+  }
+
   // DANGLING_PIPE_END
   return {
     type: 'simple-marker',

@@ -122,6 +122,16 @@ export class AssetsController {
     return this.assetsService.findWithin(polygon);
   }
 
+  @Get('summary')
+  @ApiOperation({
+    summary: 'Get network summary statistics (B4)',
+    description:
+      'Returns aggregate counts by type and status, along with total pipe network length calculated in metres via PostGIS geography.',
+  })
+  async getSummary() {
+    return this.assetsService.getSummary();
+  }
+
   // --- ID Routes (Declared AFTER specific routes per D5) ---
 
   @Get(':id')

@@ -20,13 +20,17 @@ export default function ValidationList({
         return 'badge badge-rule-valve';
       case 'DANGLING_PIPE_END':
         return 'badge badge-rule-pipe';
+      case 'DUPLICATE_POINTS':
+        return 'badge badge-rule-dup';
       default:
         return 'badge';
     }
   };
 
   const getRuleIcon = (rule: ValidationRule) => {
-    return rule === 'VALVE_NOT_ON_PIPE' ? '⚠️' : '❌';
+    if (rule === 'VALVE_NOT_ON_PIPE') return '⚠️';
+    if (rule === 'DUPLICATE_POINTS') return '👥';
+    return '❌';
   };
 
   return (
@@ -71,11 +75,13 @@ export default function ValidationList({
             lineHeight: 1.5,
           }}
         >
-          Topological network rules verified via PostGIS spatial predicates (1m tolerance on spheroid):
+          Topological network rules verified via PostGIS spatial predicates:
           <br />
           • <strong>VALVE_NOT_ON_PIPE</strong> (Valve &gt; 1m from any pipe)
           <br />
           • <strong>DANGLING_PIPE_END</strong> (Pipe endpoint unconnected)
+          <br />
+          • <strong>DUPLICATE_POINTS</strong> (Same type points within 0.5m)
         </div>
 
         {report.features.length === 0 ? (
@@ -99,6 +105,8 @@ export default function ValidationList({
               const cardClass =
                 rule === 'VALVE_NOT_ON_PIPE'
                   ? 'issue-card rule-valve'
+                  : rule === 'DUPLICATE_POINTS'
+                  ? 'issue-card rule-dup'
                   : 'issue-card rule-pipe';
 
               return (

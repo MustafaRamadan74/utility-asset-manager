@@ -29,6 +29,7 @@ import {
 
 interface MapViewComponentProps {
   mode: InteractionMode;
+  addAssetSubtype?: 'POINT' | 'PIPE';
   filters: { type?: AssetType; status?: AssetStatus };
   selectedAsset: Asset | null;
   selectedAssets: Asset[];
@@ -38,12 +39,14 @@ interface MapViewComponentProps {
   onAssetsLoaded: (count: number, isCapped: boolean) => void;
   onLoadingChange: (loading: boolean) => void;
   onMapClickPoint?: (coord: [number, number]) => void;
+  onPipeDrawn?: (coordinates: [number, number][]) => void;
   onPolygonDrawn?: (polygon: GeoJSONPolygon) => void;
   zoomLocation?: { center: [number, number]; zoom?: number; timestamp: number } | null;
 }
 
 export default function MapViewComponent({
   mode,
+  addAssetSubtype = 'POINT',
   filters,
   selectedAsset,
   selectedAssets,
@@ -54,6 +57,7 @@ export default function MapViewComponent({
   onAssetsLoaded,
   onLoadingChange,
   onMapClickPoint,
+  onPipeDrawn,
   onPolygonDrawn,
 }: MapViewComponentProps) {
   const mapDivRef = useRef<HTMLDivElement>(null);
@@ -67,8 +71,16 @@ export default function MapViewComponent({
   // Keep latest props in refs for event callbacks
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  const addAssetSubtypeRef = useRef(addAssetSubtype);
+  addAssetSubtypeRef.current = addAssetSubtype;
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
+  const onMapClickPointRef = useRef(onMapClickPoint);
+  onMapClickPointRef.current = onMapClickPoint;
+  const onPipeDrawnRef = useRef(onPipeDrawn);
+  onPipeDrawnRef.current = onPipeDrawn;
+  const onPolygonDrawnRef = useRef(onPolygonDrawn);
+  onPolygonDrawnRef.current = onPolygonDrawn;
 
   // Initialize MapView once on mount
   useEffect(() => {
@@ -115,7 +127,7 @@ export default function MapViewComponent({
     });
     viewRef.current = view;
 
-    // 5. SketchViewModel for drawing polygons (D7)
+    // 5. SketchViewModel for drawing polygons & pipes (D7 / F3)
     const sketchVM = new SketchViewModel({
       view,
       layer: selectionLayer,
@@ -127,30 +139,78 @@ export default function MapViewComponent({
           width: 2,
         },
       } as any,
+      polylineSymbol: {
+        type: 'simple-line',
+        color: [56, 189, 248, 1],
+        width: 4,
+      } as any,
     });
     sketchVmRef.current = sketchVM;
 
     sketchVM.on('create', (event: any) => {
       const geom = event.graphic?.geometry || event.geometry;
       if (event.state === 'complete' && geom) {
-        const polyGeom = geom as __esri.Polygon;
-        const geoPoly = webMercatorUtils.webMercatorToGeographic(
-          polyGeom,
-        ) as __esri.Polygon;
+        if (geom.type === 'polygon') {
+          const polyGeom = geom as __esri.Polygon;
+          const geoPoly = webMercatorUtils.webMercatorToGeographic(
+            polyGeom,
+          ) as __esri.Polygon;
 
-        // Convert to GeoJSON Polygon order [[[lng, lat], ...]]
-        const coordinates = geoPoly.rings.map((ring: number[][]) =>
-          ring.map(([x, y]) => [
-            parseFloat(x.toFixed(6)),
-            parseFloat(y.toFixed(6)),
-          ]),
-        );
+          // Convert to GeoJSON Polygon order [[[lng, lat], ...]]
+          const coordinates = geoPoly.rings.map((ring: number[][]) =>
+            ring.map(([x, y]) => [
+              parseFloat(x.toFixed(6)),
+              parseFloat(y.toFixed(6)),
+            ]),
+          );
 
-        if (onPolygonDrawn) {
-          onPolygonDrawn({
-            type: 'Polygon',
-            coordinates: coordinates as any,
-          });
+          if (onPolygonDrawnRef.current) {
+            onPolygonDrawnRef.current({
+              type: 'Polygon',
+              coordinates: coordinates as any,
+            });
+          }
+        } else if (geom.type === 'polyline') {
+          const polylineGeom = geom as __esri.Polyline;
+          const geoLine = webMercatorUtils.webMercatorToGeographic(
+            polylineGeom,
+          ) as __esri.Polyline;
+
+          if (geoLine && geoLine.paths && geoLine.paths.length > 0) {
+            const rawCoords = geoLine.paths[0].map(([x, y]) => [
+              parseFloat(x.toFixed(6)),
+              parseFloat(y.toFixed(6)),
+            ]);
+
+            // Filter out duplicate consecutive points (Validation: duplicate points rule)
+            const deduplicatedCoords: [number, number][] = [];
+            for (const pt of rawCoords) {
+              if (deduplicatedCoords.length === 0) {
+                deduplicatedCoords.push([pt[0], pt[1]]);
+              } else {
+                const prev = deduplicatedCoords[deduplicatedCoords.length - 1];
+                if (
+                  Math.abs(prev[0] - pt[0]) > 0.000001 ||
+                  Math.abs(prev[1] - pt[1]) > 0.000001
+                ) {
+                  deduplicatedCoords.push([pt[0], pt[1]]);
+                }
+              }
+            }
+
+            // Zero-length pipes validation (at least 2 distinct points required)
+            if (deduplicatedCoords.length < 2) {
+              alert(
+                'Invalid pipe: Pipe must have at least 2 distinct points (zero-length pipes are not allowed)',
+              );
+              sketchVM.create('polyline');
+              return;
+            }
+
+            if (onPipeDrawnRef.current) {
+              onPipeDrawnRef.current(deduplicatedCoords);
+            }
+          }
         }
       }
     });
@@ -219,15 +279,18 @@ export default function MapViewComponent({
           }
         }
         onAssetSelect(null);
-      } else if (currentMode === 'ADD_ASSET') {
+      } else if (
+        currentMode === 'ADD_ASSET' &&
+        addAssetSubtypeRef.current === 'POINT'
+      ) {
         // Point placement for creating asset
         const geoPoint = webMercatorUtils.webMercatorToGeographic(
           event.mapPoint,
         ) as Point;
         const lng = parseFloat(geoPoint.longitude.toFixed(6));
         const lat = parseFloat(geoPoint.latitude.toFixed(6));
-        if (onMapClickPoint) {
-          onMapClickPoint([lng, lat]);
+        if (onMapClickPointRef.current) {
+          onMapClickPointRef.current([lng, lat]);
         }
       }
     });
@@ -250,10 +313,12 @@ export default function MapViewComponent({
     if (!sketchVmRef.current) return;
     if (mode === 'DRAW_POLYGON') {
       sketchVmRef.current.create('polygon');
+    } else if (mode === 'ADD_ASSET' && addAssetSubtype === 'PIPE') {
+      sketchVmRef.current.create('polyline');
     } else {
       sketchVmRef.current.cancel();
     }
-  }, [mode]);
+  }, [mode, addAssetSubtype]);
 
   // Watch programmatic zoom requests (focusing on an asset or validation issue)
   useEffect(() => {

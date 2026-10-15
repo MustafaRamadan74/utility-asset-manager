@@ -1,4 +1,7 @@
-export type ValidationRule = 'VALVE_NOT_ON_PIPE' | 'DANGLING_PIPE_END';
+export type ValidationRule =
+  | 'VALVE_NOT_ON_PIPE'
+  | 'DANGLING_PIPE_END'
+  | 'DUPLICATE_POINTS';
 
 export interface ValidationIssueProperties {
   rule: ValidationRule;

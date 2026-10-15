@@ -7,6 +7,7 @@ import { api, ApiError } from '../lib/api';
 interface AssetFormProps {
   asset?: Asset | null;
   initialPoint?: [number, number] | null;
+  initialPipeCoordinates?: [number, number][] | null;
   onClose: () => void;
   onSaveSuccess: (savedAsset: Asset) => void;
   onDeleteSuccess?: (deletedId: string) => void;
@@ -15,19 +16,25 @@ interface AssetFormProps {
 export default function AssetForm({
   asset,
   initialPoint,
+  initialPipeCoordinates,
   onClose,
   onSaveSuccess,
   onDeleteSuccess,
 }: AssetFormProps) {
-  const isCreateMode = !asset && !!initialPoint;
+  const isCreateMode = !asset && (!!initialPoint || !!initialPipeCoordinates);
+  const isCreatingPipe = !asset && !!initialPipeCoordinates;
 
-  const [type, setType] = useState<AssetType>(asset?.type || 'VALVE');
+  const [type, setType] = useState<AssetType>(
+    isCreatingPipe ? 'PIPE' : asset?.type || 'VALVE',
+  );
   const [name, setName] = useState(asset?.name || '');
   const [status, setStatus] = useState<AssetStatus>(asset?.status || 'ACTIVE');
   const [diameterMm, setDiameterMm] = useState<string>(
     asset?.diameter_mm !== null && asset?.diameter_mm !== undefined
       ? asset.diameter_mm.toString()
-      : '',
+      : isCreatingPipe
+        ? '150'
+        : '',
   );
 
   const [isSaving, setIsSaving] = useState(false);
@@ -35,7 +42,7 @@ export default function AssetForm({
   const [errorMessages, setErrorMessages] = useState<string[]>([]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Sync state whenever selected asset or initialPoint changes
+  // Sync state whenever selected asset, initialPoint, or initialPipeCoordinates change
   useEffect(() => {
     if (asset) {
       setType(asset.type);
@@ -46,6 +53,11 @@ export default function AssetForm({
           ? asset.diameter_mm.toString()
           : '',
       );
+    } else if (initialPipeCoordinates) {
+      setType('PIPE');
+      setName('');
+      setStatus('ACTIVE');
+      setDiameterMm('150');
     } else if (initialPoint) {
       setType('VALVE');
       setName('');
@@ -54,7 +66,7 @@ export default function AssetForm({
     }
     setErrorMessages([]);
     setSuccessMessage(null);
-  }, [asset, initialPoint]);
+  }, [asset, initialPoint, initialPipeCoordinates]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,20 +82,42 @@ export default function AssetForm({
 
     setIsSaving(true);
     try {
-      if (isCreateMode && initialPoint) {
-        // Create new asset (F3)
-        const newAsset = await api.createAsset({
-          name: trimmedName,
-          type,
-          status,
-          diameter_mm: null,
-          geometry: {
-            type: 'Point',
-            coordinates: initialPoint,
-          },
-        });
-        setSuccessMessage('Asset created successfully');
-        onSaveSuccess(newAsset);
+      if (isCreateMode) {
+        if (isCreatingPipe && initialPipeCoordinates) {
+          const parsedDiameter = parseInt(diameterMm, 10);
+          if (isNaN(parsedDiameter) || parsedDiameter <= 0) {
+            setErrorMessages([
+              'Diameter is required and must be a positive integer for pipes',
+            ]);
+            setIsSaving(false);
+            return;
+          }
+          const newAsset = await api.createAsset({
+            name: trimmedName,
+            type: 'PIPE',
+            status,
+            diameter_mm: parsedDiameter,
+            geometry: {
+              type: 'LineString',
+              coordinates: initialPipeCoordinates,
+            },
+          });
+          setSuccessMessage('Pipe asset created successfully');
+          onSaveSuccess(newAsset);
+        } else if (initialPoint) {
+          const newAsset = await api.createAsset({
+            name: trimmedName,
+            type,
+            status,
+            diameter_mm: null,
+            geometry: {
+              type: 'Point',
+              coordinates: initialPoint,
+            },
+          });
+          setSuccessMessage('Asset created successfully');
+          onSaveSuccess(newAsset);
+        }
       } else if (asset) {
         // Update existing asset (F2)
         const payload: {
@@ -159,6 +193,9 @@ export default function AssetForm({
   };
 
   const formatGeometry = () => {
+    if (isCreateMode && initialPipeCoordinates) {
+      return `LineString (${initialPipeCoordinates.length} vertices)`;
+    }
     if (isCreateMode && initialPoint) {
       return `Point [${initialPoint[0].toFixed(5)}, ${initialPoint[1].toFixed(5)}]`;
     }
@@ -288,22 +325,33 @@ export default function AssetForm({
 
         {/* Edit / Create Form */}
         <form onSubmit={handleSave}>
-          {/* Asset Type (Selectable in create mode, immutable in edit mode) */}
+          {/* Asset Type (Selectable in create mode if point, fixed if pipe) */}
           {isCreateMode && (
             <div className="form-group">
               <label className="form-label" htmlFor="create-type-select">
                 Asset Type <span style={{ color: '#f43f5e' }}>*</span>
               </label>
-              <select
-                id="create-type-select"
-                className="form-select"
-                value={type}
-                onChange={(e) => setType(e.target.value as AssetType)}
-                disabled={isSaving}
-              >
-                <option value="VALVE">VALVE (Control Point)</option>
-                <option value="HYDRANT">HYDRANT (Fire Service Point)</option>
-              </select>
+              {isCreatingPipe ? (
+                <input
+                  id="create-type-select"
+                  type="text"
+                  className="form-input"
+                  value="PIPE (Water Distribution Line)"
+                  disabled
+                  style={{ opacity: 0.9, background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8' }}
+                />
+              ) : (
+                <select
+                  id="create-type-select"
+                  className="form-select"
+                  value={type}
+                  onChange={(e) => setType(e.target.value as AssetType)}
+                  disabled={isSaving}
+                >
+                  <option value="VALVE">VALVE (Control Point)</option>
+                  <option value="HYDRANT">HYDRANT (Fire Service Point)</option>
+                </select>
+              )}
             </div>
           )}
 
@@ -319,7 +367,11 @@ export default function AssetForm({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={
-                isCreateMode ? 'e.g. Valve V-12 or Hydrant H-15' : 'Asset name'
+                isCreatingPipe
+                  ? 'e.g. Distribution Pipe P-22'
+                  : isCreateMode
+                    ? 'e.g. Valve V-12 or Hydrant H-15'
+                    : 'Asset name'
               }
               required
               disabled={isSaving || isDeleting}
@@ -345,7 +397,7 @@ export default function AssetForm({
           </div>
 
           {/* Diameter (Conditional for PIPE per D2/D5) */}
-          {!isCreateMode && asset?.type === 'PIPE' && (
+          {((isCreateMode && isCreatingPipe) || (!isCreateMode && asset?.type === 'PIPE')) && (
             <div className="form-group">
               <label className="form-label" htmlFor="asset-diameter-input">
                 Pipe Diameter (mm) <span style={{ color: '#f43f5e' }}>*</span>

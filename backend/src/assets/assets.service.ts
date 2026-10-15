@@ -170,6 +170,35 @@ export class AssetsService {
   }
 
   /**
+   * Get network summary metrics and total pipe length in metres (B4).
+   */
+  async getSummary(): Promise<{
+    totalAssets: number;
+    pipesCount: number;
+    valvesCount: number;
+    hydrantsCount: number;
+    activeCount: number;
+    maintenanceCount: number;
+    decommissionedCount: number;
+    totalPipeLengthM: number;
+  }> {
+    const sql = `
+      SELECT 
+        COUNT(*)::int AS "totalAssets",
+        COUNT(*) FILTER (WHERE type = 'PIPE')::int AS "pipesCount",
+        COUNT(*) FILTER (WHERE type = 'VALVE')::int AS "valvesCount",
+        COUNT(*) FILTER (WHERE type = 'HYDRANT')::int AS "hydrantsCount",
+        COUNT(*) FILTER (WHERE status = 'ACTIVE')::int AS "activeCount",
+        COUNT(*) FILTER (WHERE status = 'MAINTENANCE')::int AS "maintenanceCount",
+        COUNT(*) FILTER (WHERE status = 'DECOMMISSIONED')::int AS "decommissionedCount",
+        COALESCE(ROUND(SUM(ST_Length(geom::geography)) FILTER (WHERE type = 'PIPE')::numeric, 1), 0)::float AS "totalPipeLengthM"
+      FROM assets;
+    `;
+    const rows = await this.dataSource.query(sql);
+    return rows[0];
+  }
+
+  /**
    * Get single asset by UUID.
    */
   async findOne(id: string): Promise<Asset> {

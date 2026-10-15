@@ -68,6 +68,29 @@ export class ValidationService {
       });
     }
 
+    // Rule 3: DUPLICATE_POINTS (same type within 0.5 m)
+    const duplicatePointsSql = `
+      SELECT a1.id AS id1, a1.name AS name1, a2.id AS id2, a2.name AS name2, a1.type,
+             ST_AsGeoJSON(a1.geom)::json AS geometry,
+             ROUND(ST_Distance(a1.geom::geography, a2.geom::geography)::numeric, 2) AS dist_m
+      FROM assets a1
+      JOIN assets a2 ON a1.type = a2.type AND a1.id < a2.id AND a1.type IN ('VALVE', 'HYDRANT')
+      WHERE ST_DWithin(a1.geom::geography, a2.geom::geography, 0.5);
+    `;
+    const duplicatePoints = await this.dataSource.query(duplicatePointsSql);
+
+    for (const dp of duplicatePoints) {
+      features.push({
+        type: 'Feature',
+        geometry: dp.geometry,
+        properties: {
+          rule: 'DUPLICATE_POINTS',
+          asset_ids: [dp.id1, dp.id2],
+          message: `Duplicate ${dp.type} points: "${dp.name1}" and "${dp.name2}" within ${dp.dist_m}m of each other`,
+        },
+      });
+    }
+
     return {
       type: 'FeatureCollection',
       features,

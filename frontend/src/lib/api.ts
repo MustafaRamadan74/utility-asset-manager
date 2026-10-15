@@ -3,6 +3,7 @@ import {
   AssetStatus,
   AssetType,
   GeoJSONPolygon,
+  NetworkSummary,
   ValidationReport,
 } from '../types/asset';
 
@@ -162,5 +163,12 @@ export const api = {
    */
   async getValidationReport(): Promise<ValidationReport> {
     return request<ValidationReport>(`${API_BASE}/validation/report`);
+  },
+
+  /**
+   * Fetch aggregate network summary metrics and total pipe length (B4).
+   */
+  async getSummary(): Promise<NetworkSummary> {
+    return request<NetworkSummary>(`${API_BASE}/assets/summary`);
   },
 };

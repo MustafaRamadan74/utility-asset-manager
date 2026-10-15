@@ -32,7 +32,21 @@ export interface Asset {
 
 export type InteractionMode = 'VIEW' | 'ADD_ASSET' | 'DRAW_POLYGON';
 
-export type ValidationRule = 'VALVE_NOT_ON_PIPE' | 'DANGLING_PIPE_END';
+export type ValidationRule =
+  | 'VALVE_NOT_ON_PIPE'
+  | 'DANGLING_PIPE_END'
+  | 'DUPLICATE_POINTS';
+
+export interface NetworkSummary {
+  totalAssets: number;
+  pipesCount: number;
+  valvesCount: number;
+  hydrantsCount: number;
+  activeCount: number;
+  maintenanceCount: number;
+  decommissionedCount: number;
+  totalPipeLengthM: number;
+}
 
 export interface ValidationIssueProperties {
   rule: ValidationRule;
