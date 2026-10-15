@@ -9,6 +9,7 @@ import GraphicsLayer from '@arcgis/core/layers/GraphicsLayer';
 import SketchViewModel from '@arcgis/core/widgets/Sketch/SketchViewModel';
 import * as webMercatorUtils from '@arcgis/core/geometry/support/webMercatorUtils';
 import Point from '@arcgis/core/geometry/Point';
+import Graphic from '@arcgis/core/Graphic';
 
 import {
   Asset,
@@ -38,6 +39,7 @@ interface MapViewComponentProps {
   onLoadingChange: (loading: boolean) => void;
   onMapClickPoint?: (coord: [number, number]) => void;
   onPolygonDrawn?: (polygon: GeoJSONPolygon) => void;
+  zoomLocation?: { center: [number, number]; zoom?: number; timestamp: number } | null;
 }
 
 export default function MapViewComponent({
@@ -47,6 +49,7 @@ export default function MapViewComponent({
   selectedAssets,
   validationReport,
   refreshTrigger,
+  zoomLocation,
   onAssetSelect,
   onAssetsLoaded,
   onLoadingChange,
@@ -204,7 +207,13 @@ export default function MapViewComponent({
           for (const res of response.results) {
             const g = (res as any).graphic;
             if (g && g.attributes && g.attributes.id) {
-              onAssetSelect(g.attributes as Asset);
+              const attr = { ...g.attributes };
+              if (attr.rawGeometry) {
+                try {
+                  attr.geometry = JSON.parse(attr.rawGeometry);
+                } catch {}
+              }
+              onAssetSelect(attr as Asset);
               return;
             }
           }
@@ -232,8 +241,12 @@ export default function MapViewComponent({
     };
   }, []); // Run once on mount
 
-  // Watch interaction mode changes (Sketch activation)
+  // Watch interaction mode changes (Sketch activation & cursor styling)
   useEffect(() => {
+    if (mapDivRef.current) {
+      mapDivRef.current.style.cursor =
+        mode === 'ADD_ASSET' ? 'crosshair' : 'default';
+    }
     if (!sketchVmRef.current) return;
     if (mode === 'DRAW_POLYGON') {
       sketchVmRef.current.create('polygon');
@@ -242,17 +255,31 @@ export default function MapViewComponent({
     }
   }, [mode]);
 
+  // Watch programmatic zoom requests (focusing on an asset or validation issue)
+  useEffect(() => {
+    if (!zoomLocation || !viewRef.current) return;
+    viewRef.current.goTo({
+      center: zoomLocation.center,
+      zoom: zoomLocation.zoom || 18,
+    });
+  }, [zoomLocation]);
+
   // Update selection highlight layer
   useEffect(() => {
     if (!selectionLayerRef.current) return;
     selectionLayerRef.current.removeAll();
 
     if (selectedAsset) {
-      selectionLayerRef.current.add(assetToSelectionGraphic(selectedAsset));
+      const g = assetToSelectionGraphic(selectedAsset);
+      if (g) selectionLayerRef.current.add(g);
     }
     if (selectedAssets && selectedAssets.length > 0) {
-      const graphics = selectedAssets.map((a) => assetToSelectionGraphic(a));
-      selectionLayerRef.current.addMany(graphics);
+      const graphics = selectedAssets
+        .map((a) => assetToSelectionGraphic(a))
+        .filter((g): g is Graphic => g !== null);
+      if (graphics.length > 0) {
+        selectionLayerRef.current.addMany(graphics);
+      }
     }
   }, [selectedAsset, selectedAssets]);
 

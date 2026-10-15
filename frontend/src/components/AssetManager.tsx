@@ -6,12 +6,14 @@ import {
   Asset,
   AssetStatus,
   AssetType,
-  GeoJSONPolygon,
   InteractionMode,
+  ValidationFeature,
   ValidationReport,
 } from '../types/asset';
 import { api } from '../lib/api';
 import AssetForm from './AssetForm';
+import SelectionTable from './SelectionTable';
+import ValidationList from './ValidationList';
 
 // Dynamic import with SSR disabled inside Client Component (D7)
 const MapView = dynamic(() => import('./MapView'), {
@@ -37,9 +39,18 @@ const MapView = dynamic(() => import('./MapView'), {
 export default function AssetManager() {
   const [mode, setMode] = useState<InteractionMode>('VIEW');
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+  const [createPoint, setCreatePoint] = useState<[number, number] | null>(null);
   const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
   const [validationReport, setValidationReport] =
     useState<ValidationReport | null>(null);
+
+  const [showSelectionTable, setShowSelectionTable] = useState(false);
+  const [showValidationList, setShowValidationList] = useState(false);
+  const [zoomLocation, setZoomLocation] = useState<{
+    center: [number, number];
+    zoom?: number;
+    timestamp: number;
+  } | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isCapped, setIsCapped] = useState(false);
@@ -56,7 +67,10 @@ export default function AssetManager() {
     try {
       const report = await api.getValidationReport();
       setValidationReport(report);
-      alert(`Validation complete! Found ${report.features.length} issues.`);
+      setShowValidationList(true);
+      setShowSelectionTable(false);
+      setSelectedAsset(null);
+      setCreatePoint(null);
     } catch (err: any) {
       alert(`Validation failed: ${err.message}`);
     } finally {
@@ -66,12 +80,38 @@ export default function AssetManager() {
 
   const handleClearIssues = () => {
     setValidationReport(null);
+    setShowValidationList(false);
   };
 
   const handleClearSelection = () => {
     setSelectedAsset(null);
     setSelectedAssets([]);
+    setCreatePoint(null);
+    setShowSelectionTable(false);
     setMode('VIEW');
+  };
+
+  const handleSelectTableRowClick = (asset: Asset) => {
+    setSelectedAsset(asset);
+    const coords: [number, number] =
+      asset.geometry.type === 'Point'
+        ? asset.geometry.coordinates
+        : asset.geometry.coordinates[
+            Math.floor(asset.geometry.coordinates.length / 2)
+          ];
+    setZoomLocation({
+      center: coords,
+      zoom: 19,
+      timestamp: Date.now(),
+    });
+  };
+
+  const handleIssueRowClick = (feature: ValidationFeature) => {
+    setZoomLocation({
+      center: feature.geometry.coordinates,
+      zoom: 19,
+      timestamp: Date.now(),
+    });
   };
 
   return (
@@ -93,7 +133,7 @@ export default function AssetManager() {
               className={`btn-toggle ${mode === 'VIEW' ? 'active' : ''}`}
               onClick={() => {
                 setMode('VIEW');
-                setSelectedAssets([]);
+                setCreatePoint(null);
               }}
             >
               👁️ View & Inspect
@@ -103,7 +143,7 @@ export default function AssetManager() {
               onClick={() => {
                 setMode('ADD_ASSET');
                 setSelectedAsset(null);
-                setSelectedAssets([]);
+                setShowSelectionTable(false);
               }}
             >
               ➕ Add Asset
@@ -113,6 +153,7 @@ export default function AssetManager() {
               onClick={() => {
                 setMode('DRAW_POLYGON');
                 setSelectedAsset(null);
+                setCreatePoint(null);
               }}
             >
               ✏️ Select Polygon
@@ -179,7 +220,7 @@ export default function AssetManager() {
           {isLoading && (
             <div className="loading-pill">
               <div className="spinner" />
-              Loading extent assets...
+              Loading network data...
             </div>
           )}
 
@@ -219,7 +260,8 @@ export default function AssetManager() {
                 color: 'var(--text-dim)',
               }}
             >
-              Visible Assets: <strong style={{ color: 'var(--text-main)' }}>{assetCount}</strong>
+              Visible Assets:{' '}
+              <strong style={{ color: 'var(--text-main)' }}>{assetCount}</strong>
             </div>
           </div>
         </div>
@@ -232,21 +274,33 @@ export default function AssetManager() {
           selectedAssets={selectedAssets}
           validationReport={validationReport}
           refreshTrigger={refreshTrigger}
-          onAssetSelect={(asset) => setSelectedAsset(asset)}
+          zoomLocation={zoomLocation}
+          onAssetSelect={(asset) => {
+            setSelectedAsset(asset);
+            setCreatePoint(null);
+            setShowSelectionTable(false);
+            setShowValidationList(false);
+          }}
           onAssetsLoaded={(count, capped) => {
             setAssetCount(count);
             setIsCapped(capped);
           }}
           onLoadingChange={(loading) => setIsLoading(loading)}
           onMapClickPoint={(coords) => {
-            alert(`Map clicked at: [${coords[0]}, ${coords[1]}]. (Phase 10 AssetForm modal will open here)`);
+            setCreatePoint(coords);
+            setSelectedAsset(null);
+            setShowSelectionTable(false);
+            setShowValidationList(false);
           }}
           onPolygonDrawn={async (poly) => {
             setIsLoading(true);
             try {
               const matching = await api.queryWithin(poly);
               setSelectedAssets(matching);
-              alert(`Selected ${matching.length} assets intersecting polygon!`);
+              setShowSelectionTable(true);
+              setShowValidationList(false);
+              setSelectedAsset(null);
+              setCreatePoint(null);
             } catch (err: any) {
               alert(`Selection query failed: ${err.message}`);
             } finally {
@@ -255,11 +309,11 @@ export default function AssetManager() {
           }}
         />
 
-        {/* Asset Details & Editing Side Panel (Phase 9) */}
+        {/* Asset Details & Editing Side Panel (Phase 9 - F2) */}
         {selectedAsset && (
           <AssetForm
             asset={selectedAsset}
-            onClose={handleClearSelection}
+            onClose={() => setSelectedAsset(null)}
             onSaveSuccess={(updated) => {
               setSelectedAsset(updated);
               setRefreshTrigger((prev) => prev + 1);
@@ -268,6 +322,41 @@ export default function AssetManager() {
               setSelectedAsset(null);
               setRefreshTrigger((prev) => prev + 1);
             }}
+          />
+        )}
+
+        {/* Add Asset Side Panel (Phase 10 - F3) */}
+        {createPoint && (
+          <AssetForm
+            initialPoint={createPoint}
+            onClose={() => setCreatePoint(null)}
+            onSaveSuccess={(created) => {
+              setCreatePoint(null);
+              setMode('VIEW');
+              setSelectedAsset(created);
+              setRefreshTrigger((prev) => prev + 1);
+            }}
+          />
+        )}
+
+        {/* Polygon Selected Assets Table (Phase 10 - F4) */}
+        {showSelectionTable && selectedAssets.length > 0 && (
+          <SelectionTable
+            assets={selectedAssets}
+            onClose={() => {
+              setShowSelectionTable(false);
+              setSelectedAssets([]);
+            }}
+            onAssetClick={handleSelectTableRowClick}
+          />
+        )}
+
+        {/* Topological Validation Issues List (Phase 10 - F5) */}
+        {showValidationList && validationReport && (
+          <ValidationList
+            report={validationReport}
+            onClose={handleClearIssues}
+            onIssueClick={handleIssueRowClick}
           />
         )}
       </div>
