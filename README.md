@@ -36,20 +36,22 @@ utility-asset-manager/
 ├─ README.md                 # Complete system documentation
 ├─ backend/                  # NestJS TypeScript Application
 │  ├─ Dockerfile             # Multi-stage production container
+│  ├─ .dockerignore          # Build context optimization filter
 │  └─ src/
 │     ├─ main.ts             # Bootstrap, CORS, ValidationPipe, Swagger
 │     ├─ app.module.ts       # Root module
 │     ├─ config/             # TypeORM DataSource & Environment config
 │     ├─ database/           # Schema migrations & Seed dataset
-│     ├─ assets/             # CRUD, Spatial endpoints, DTOs, Geometry util
+│     ├─ assets/             # CRUD, Spatial endpoints, Undo rollback, Summary HUD, DTOs
 │     ├─ validation/         # PostGIS topological validation engine
 │     └─ health/             # DB & Service health check
 └─ frontend/                 # Next.js App Router Application
    ├─ Dockerfile             # Multi-stage production container
+   ├─ .dockerignore          # Build context optimization filter
    └─ src/
       ├─ app/                # Server Components (layout.tsx, page.tsx, globals.css)
-      ├─ components/         # Client Components (AssetManager, MapView, Forms, Panels)
-      ├─ lib/                # Typed API client, Geo projection utils, Symbology
+      ├─ components/         # Client Components (AssetManager, MapView, Forms, Panels, Toast)
+      ├─ lib/                # Typed API client, Geo projection utils, Symbology, Snapping
       └─ types/              # Domain models & TypeScript interfaces
 ```
 
@@ -65,7 +67,7 @@ utility-asset-manager/
 | **Validation Layer** | **class-validator / class-transformer** | Strict DTO validation with conditional logic (`@ValidateIf`), positive integer constraints. |
 | **Database & GIS** | **PostgreSQL 15 + PostGIS 3.4** | Native spatial types, spherical geodesics, topological predicates (`ST_DWithin`, `ST_Intersects`, `ST_MakeValid`). |
 | **Data Access** | **TypeORM (Raw SQL)** | Schema migrations and Connection Pool management with high-performance parameterized raw SQL (`$1, $2`). |
-| **Containerization** | **Docker & Docker Compose** | Isolated multi-service stack with deterministic startup and health-check synchronization. |
+| **Containerization** | **Docker & Docker Compose** | Isolated multi-service stack with deterministic startup, `.dockerignore` context isolation, and health-check synchronization. |
 
 ---
 
@@ -161,6 +163,19 @@ CONSTRAINT chk_pipe_diameter CHECK (
 - Every critical column is explicitly `NOT NULL`.
 - `updated_at` is automatically updated via a PostgreSQL trigger function (`trigger_set_timestamp`).
 
+### Database-Backed Audit & Undo System (`asset_undo_logs`)
+- Every mutating user operation (`CREATE`, `UPDATE`, `DELETE`) is atomically logged in PostgreSQL with a full snapshot payload (`snapshot_data`) and metadata.
+- When the user clicks `↩️ Undo`, `POST /api/assets/undo` inspects the most recent undo log entry and performs an exact inverse action:
+  - **Undo DELETE**: Re-inserts the deleted asset using its exact original UUID, properties, and GeoJSON geometry.
+  - **Undo CREATE**: Removes the newly created asset from the network.
+  - **Undo UPDATE**: Restores the previous attributes from the prior snapshot.
+- The UI exposes a responsive status check (`GET /api/assets/undo/status`) that enables the Undo button only when an action is available and displays the name and type of the affected asset.
+
+### Real-Time Geodesic Snapping Engine (1–5m Tolerance)
+- During interactive pipe drawing and asset placement, the map client continuously calculates geodesic distances on the spheroid to all existing point assets (valves, hydrants) and pipe vertices.
+- When the user's cursor approaches within 5 metres, it automatically snaps to the target vertex with visual ring cues and distance badges (`🧲 Snapped (2.3m)`).
+- This ensures clean topological connections directly at the client stage, preventing micro-gaps and dangling lines before data is committed.
+
 ### Raw Parameterized SQL for Spatial Queries
 While TypeORM is used for `DataSource` connection pooling and migration management, all spatial queries use raw SQL via `dataSource.query(sql, [params])`. This eliminates ORM impedance mismatches with PostGIS geometry types and ensures direct use of spatial indexes while completely preventing SQL injection.
 
@@ -195,17 +210,15 @@ Both rule results are transformed into a standard GeoJSON `FeatureCollection` wi
 
 ### Multi-Tier Validation
 1. **DTO Layer**: `class-validator` enforces type rules, non-empty trimmed strings, valid enums, and positive integers.
-2. **Geometry Utility (`geometry.util.ts`)**: Validates GeoJSON structure, coordinates array bounds (longitude [-180, 180], latitude [-90, 90]), position count, and polygon ring closure.
+2. **Geometry Utility (`geometry.util.ts`)**: Validates GeoJSON structure, coordinates array bounds (longitude [-180, 180], latitude [-90, 90]), position count, zero-length pipes, and duplicate consecutive coordinates.
 3. **Database Constraints**: Guarantees data validity even against direct SQL modifications.
 
 ### Cartographic Symbology & Stale Request Cancellation
 - **Symbology**: Active pipes (solid blue), decommissioned pipes (dashed slate grey), active valves (emerald green), active hydrants (crimson diamond), decommissioned points (hollow desaturated markers).
 - **Network In-Flight Abort**: When panning or zooming quickly across the map, an `AbortController` cleanly cancels in-flight extent requests before initiating a new one, avoiding race conditions and backend congestion.
 
-### Networking & Dual-Environment Resolution
-- Client browser interacts with `http://localhost:3001/api` (`NEXT_PUBLIC_API_URL`, baked at Next.js build time).
-- Inside Docker, the backend connects to `db:5432` through the internal container network.
-- Cross-Origin Resource Sharing (CORS) is explicitly configured via environment variable `CORS_ORIGIN=http://localhost:3000`.
+### Optimized Docker Build Contexts
+Dedicated `.dockerignore` files exclude local development artifacts (`node_modules`, `.next`, `dist`, `.git`) from container build contexts, reducing transfer size by 99.9% and preventing platform-specific native binary conflicts (`@next/swc-win32-x64-msvc`).
 
 ---
 
@@ -220,12 +233,12 @@ Next.js App Router enforces a clear architectural separation between server-rend
   - SEO optimization: metadata, descriptive title, OpenGraph tags, and semantic structure rendered on the server.
   - Loads Esri stylesheet `@arcgis/core/assets/esri/themes/light/main.css` at the root document level.
 
-### Client Components (`AssetManager`, `MapView`, `AssetForm`, `SelectionTable`, `ValidationList`)
+### Client Components (`AssetManager`, `MapView`, `AssetForm`, `SelectionTable`, `ValidationList`, `ToastNotification`, `DeleteModal`)
 - **Role**: Handle user interaction, WebGL rendering, and state management.
 - **Why**:
   - **Browser Global Dependencies**: `@arcgis/core` depends on `window`, `document`, and WebGL Canvas APIs. Attempting to render ArcGIS MapView on the server results in `ReferenceError: window is not defined`.
   - **Dynamic Import with SSR Disabled**: `MapView` is loaded dynamically with `next/dynamic(() => import('./MapView'), { ssr: false })` **inside the Client Component (`AssetManager`)**, accompanied by a loading placeholder.
-  - **State Ownership**: React hooks (`useState`, `useEffect`, `useRef`) manage selected assets, active interaction modes (`VIEW`, `ADD_ASSET`, `DRAW_POLYGON`), in-flight abort signals, and drawer visibility.
+  - **State Ownership**: React hooks (`useState`, `useEffect`, `useRef`) manage selected assets, active interaction modes (`VIEW`, `ADD_ASSET`, `DRAW_POLYGON`), in-flight abort signals, drawer visibility, and undo stack polling.
 
 ---
 
@@ -275,6 +288,9 @@ The backend exposes an interactive Swagger OpenAPI documentation portal at `http
 | `POST` | `/api/assets` | Create a new utility asset | Body: `{ name, type, status, diameter_mm?, geometry }` |
 | `GET` | `/api/assets/nearest` | KNN spatial search with geodesic distance in metres | `lng`, `lat`, `limit` (1–50) |
 | `POST` | `/api/assets/query/within` | Find assets intersecting a user-drawn polygon | Body: GeoJSON Polygon object |
+| `GET` | `/api/assets/summary` | Global network summary metrics (counts by type, counts by status, total pipe length in metres) | None |
+| `GET` | `/api/assets/undo/status` | Check if an undo action is available and metadata of last action | None |
+| `POST` | `/api/assets/undo` | Reverts the last CREATE, UPDATE, or DELETE operation | None |
 | `GET` | `/api/assets/:id` | Retrieve an asset by UUID | Path: `id` (UUID) |
 | `PATCH` | `/api/assets/:id` | Partial update with merge-and-revalidate rule | Path: `id`, Body: `{ name?, status?, diameter_mm? }` |
 | `DELETE` | `/api/assets/:id` | Delete an asset by UUID | Path: `id` (UUID) |
@@ -286,18 +302,22 @@ The backend exposes an interactive Swagger OpenAPI documentation portal at `http
 
 | Feature | Where it is implemented |
 |---|---|
-| **PostGIS Spatial Database** | `docker-compose.yml`, PostGIS 3.4, migration DDL with constraints |
-| **Database Migrations & Constraints** | `backend/src/database/migrations/*` |
+| **PostGIS Spatial Database** | `docker-compose.yml`, PostGIS 3.4, migration DDL with defensive constraints |
+| **Database Migrations & Audit Undo** | `backend/src/database/migrations/*`, `asset_undo_logs` table |
 | **Seeded Utility Network** | `backend/src/database/seed.ts` (30 assets + 4 intentional topological errors) |
-| **NestJS Foundation & Swagger** | `backend/src/main.ts`, global prefix, `ValidationPipe`, Swagger docs |
-| **CRUD & Multi-Layer Validation** | `AssetsController`, `AssetsService`, `geometry.util.ts`, DTOs |
-| **Spatial Queries (BBOX, Within, KNN)** | Raw SQL templates, KNN `<->` index, `ST_MakeValid` |
+| **NestJS Foundation & Swagger** | `backend/src/main.ts`, global prefix, `ValidationPipe`, Swagger OpenAPI docs |
+| **CRUD & Multi-Layer Validation** | `AssetsController`, `AssetsService`, `geometry.util.ts`, strict DTOs |
+| **Spatial Queries (BBOX, Within, KNN, Summary)** | Raw SQL templates, KNN `<->` index, `ST_MakeValid`, aggregate metrics |
 | **Topological Validation Engine** | `ValidationService`, `VALVE_NOT_ON_PIPE`, `DANGLING_PIPE_END` |
-| **Interactive GIS Map & Symbology** | Next.js App Router, `@arcgis/core`, OSM WebTileLayer |
-| **Asset Details, Editing & Undo** | `AssetForm.tsx`, `AssetManager.tsx`, audit history undo system |
-| **Add Asset & Pipe Drawing** | Point placement, interactive polyline drawing with 5m snapping |
+| **Interactive GIS Map & Symbology** | Next.js App Router, `@arcgis/core`, OSM WebTileLayer, custom symbol styles |
+| **Asset Details & Edit Panel** | `AssetForm.tsx`, `AssetManager.tsx`, instant map update |
+| **Interactive Pipe Drawing & Snapping** | `SketchViewModel`, 1–5m geodesic snapping engine, duplicate points filter |
+| **Undo History System** | One-click rollback in Navbar, database audit trail, restored asset recreation |
+| **Custom Warning & 5s Toast Notifications** | Center confirmation dialog with pulse warning, 5-second auto-dismiss toasts with progress bar and error reasons |
 | **Spatial Polygon Selection** | `SketchViewModel`, spatial within query, polygon selection table |
-| **Production Docker Setup** | Multi-service Dockerfiles and `docker-compose.yml` |
+| **Legend & Summary HUD** | Bottom-right floating card, 3 asset categories, real-time metrics, collapsible |
+| **Responsive & Centered Navbar** | Centered mode buttons (`View`, `Add Asset`, `Select Polygon`), mobile 3-dash dropdown menu |
+| **Production Docker Setup** | Multi-stage Dockerfiles, `.dockerignore` context isolation, `docker-compose.yml` |
 
 ---
 
@@ -318,8 +338,8 @@ The backend exposes an interactive Swagger OpenAPI documentation portal at `http
 1. **Polyline Vertex Editing**: Integrate `SketchViewModel` vertex manipulation to allow engineers to reshape pipe geometries interactively on the map.
 2. **Bulk GeoJSON Import/Export**: Add `POST /api/assets/import` and `GET /api/assets/export` endpoints with batch validation for CAD/Shapefile migration.
 3. **Advanced Topological Rules**:
-   - `ZERO_LENGTH_PIPE`: Detect pipes where start and end coordinates are identical.
-   - `DUPLICATE_ASSETS`: Detect identical assets placed within 0.1 m of each other.
-   - `PIPE_CROSSING_WITHOUT_JUNCTION`: Detect intersecting pipes lacking a valve or junction.
+   - `DUPLICATE_ASSETS`: Detect identical assets placed within 0.1 m of each other across different features.
+   - `PIPE_CROSSING_WITHOUT_JUNCTION`: Detect intersecting pipes lacking a valve or inline junction.
+   - `CLOSED_LOOP_ANALYSIS`: Graph cycle analysis for detecting redundant loops or dead ends in utility pressure zones.
 4. **Vector Tile Caching**: Implement Martin or pg_tileserv for generating Mapbox Vector Tiles (MVT) directly from PostGIS, supporting networks with 1,000,000+ assets at 60 FPS.
 5. **Real-Time Network Telemetry**: WebSocket integration to push live sensor pressure and valve telemetry updates to the map.
